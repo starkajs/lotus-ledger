@@ -18,5 +18,9 @@ FROM node:20-alpine
 COPY ./package.json package-lock.json /app/
 COPY --from=production-dependencies-env /app/node_modules /app/node_modules
 COPY --from=build-env /app/build /app/build
+COPY ./app/db /app/app/db
+COPY ./drizzle /app/drizzle
+COPY ./drizzle.config.ts /app/drizzle.config.ts
+COPY ./scripts/db-migrate.mjs /app/scripts/db-migrate.mjs
 WORKDIR /app
 CMD ["npm", "run", "start"]

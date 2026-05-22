@@ -1,53 +1,51 @@
-# Deploying Lotus Ledger to Fly.io
+# Deploy Lotus Ledger to Fly.io
 
-This guide deploys the app to the **aptim-solutions** organisation on Fly.io, with **Managed Postgres (MPG)** for the database.
+Do this **in order**. There is no database until step 3 — do not run `npm run db:migrate` locally until you have a `DATABASE_URL`.
+
+Drizzle schema and migrations live in the repo (`app/db/schema.ts`, `drizzle/`). Migrations run **after** Fly Postgres exists.
 
 ## Prerequisites
 
-- [Fly CLI](https://fly.io/docs/hands-on/install-flyctl/) installed and authenticated (`fly auth login`)
-- Access to the `aptim-solutions` org (`fly orgs list`)
-- Docker available locally (Fly builds from the repo `Dockerfile`)
+- Fly CLI installed and logged in: `fly auth login`
+- Org access: `fly orgs list` should show `aptim-solutions`
+- Docker available (Fly builds from the repo `Dockerfile`)
 
-## Architecture
+## Step 1 — Create the Fly app (no deploy yet)
 
-| Resource | Name | Region | Purpose |
-|----------|------|--------|---------|
-| Web app | `lotus-ledger` | `lhr` | SSR React Router app |
-| Postgres | `lotus-ledger-db` | `lhr` | Managed Postgres cluster |
-
-The web app exposes **`/health`** for Fly health checks. After attaching Postgres, Fly injects a **`DATABASE_URL`** secret (not used by the app yet, but ready for migrations/ORM).
-
-## 1. First-time app setup
-
-If the app does not exist on Fly yet:
+From the project root:
 
 ```powershell
-cd path\to\lotus-ledger
+cd c:\Users\andre\dev\lotus-ledger
 
-fly launch `
-  --org aptim-solutions `
-  --name lotus-ledger `
-  --region lhr `
-  --no-deploy
+fly apps create lotus-ledger --org aptim-solutions
 ```
 
-When prompted:
+Or, if you prefer the interactive wizard:
 
-- **Use existing Dockerfile?** → Yes
-- **Copy configuration?** → No (this repo already includes `fly.toml`)
+```powershell
+fly launch --org aptim-solutions --name lotus-ledger --region lhr --no-deploy
+```
 
-If the app already exists, skip `fly launch` and deploy with the committed `fly.toml`.
+Use the existing **Dockerfile**. Do **not** copy over `fly.toml` if prompted — use the one in the repo.
 
-### fly.toml highlights
+## Step 2 — First deploy (app only, no database)
 
-- Listens on **port 3000** (`PORT` + `internal_port`)
-- **London (`lhr`)** primary region
-- **HTTP health check** on `GET /health`
-- **Auto stop/start** machines when idle (`min_machines_running = 0` for lower cost)
+`fly.toml` intentionally has **no** `release_command` yet so deploy does not require Postgres.
 
-For always-on production, set `min_machines_running = 1` in `fly.toml`.
+```powershell
+fly deploy --app lotus-ledger
+```
 
-## 2. Create Managed Postgres
+Check:
+
+```powershell
+fly open --app lotus-ledger
+curl https://lotus-ledger.fly.dev/health
+```
+
+Expect `"database": "not_configured"` — that is normal.
+
+## Step 3 — Create and attach Postgres
 
 ```powershell
 fly mpg create `
@@ -57,139 +55,98 @@ fly mpg create `
   --plan starter `
   --volume-size 10 `
   --pg-major-version 16
-```
 
-List clusters and note the **cluster ID**:
-
-```powershell
 fly mpg list --org aptim-solutions
 ```
 
-### Legacy Postgres (alternative)
-
-If you prefer a self-managed Postgres Fly app instead of MPG:
-
-```powershell
-fly postgres create `
-  --org aptim-solutions `
-  --name lotus-ledger-db `
-  --region lhr `
-  --initial-cluster-size 1 `
-  --vm-size shared-cpu-1x `
-  --volume-size 10
-```
-
-Attach with:
-
-```powershell
-fly postgres attach lotus-ledger-db --app lotus-ledger
-```
-
-## 3. Attach Postgres to the web app
+Note the cluster **ID**, then attach it to the app (this sets `DATABASE_URL`):
 
 ```powershell
 fly mpg attach <CLUSTER_ID> --app lotus-ledger
 ```
 
-Verify the secret was set:
+Verify:
 
 ```powershell
 fly secrets list --app lotus-ledger
 ```
 
-You should see `DATABASE_URL` (value is hidden).
+You should see `DATABASE_URL`.
 
-## 4. Deploy
+## Step 4 — Enable migrations and redeploy
 
-```powershell
-fly deploy --app lotus-ledger
-```
-
-Check status and open the site:
-
-```powershell
-fly status --app lotus-ledger
-fly open --app lotus-ledger
-```
-
-Test the health endpoint:
-
-```powershell
-curl https://lotus-ledger.fly.dev/health
-```
-
-Expected response:
-
-```json
-{
-  "status": "ok",
-  "timestamp": "2026-05-22T12:00:00.000Z",
-  "database": "configured"
-}
-```
-
-## 5. Custom domain (optional)
-
-```powershell
-fly certs add ledger.yourdomain.com --app lotus-ledger
-```
-
-Add the DNS records Fly prints. HTTPS is provisioned automatically once DNS propagates.
-
-## Day-to-day commands
-
-```powershell
-# Stream logs
-fly logs --app lotus-ledger
-
-# SSH into a running machine
-fly ssh console --app lotus-ledger
-
-# Connect to Postgres (MPG)
-fly mpg connect --org aptim-solutions
-
-# Scale VM memory
-fly scale memory 1024 --app lotus-ledger
-
-# Redeploy after code changes
-fly deploy --app lotus-ledger
-```
-
-## Local Docker smoke test
-
-```powershell
-docker build -t lotus-ledger .
-docker run --rm -p 3000:3000 -e PORT=3000 lotus-ledger
-```
-
-Then visit `http://localhost:3000/health`.
-
-## Adding database code later
-
-Read the connection string from the environment:
-
-```ts
-const databaseUrl = process.env.DATABASE_URL;
-```
-
-Run migrations on deploy with a `release_command` in `fly.toml` when you add an ORM, for example:
+Uncomment in `fly.toml`:
 
 ```toml
 [deploy]
-  release_command = "npx prisma migrate deploy"
+  release_command = "node scripts/db-migrate.mjs"
 ```
 
-## Cost notes
+Redeploy (runs Drizzle migrations against Fly Postgres):
 
-- The web app on a shared CPU with auto-stop can be inexpensive for low traffic.
-- MPG is billed separately; start with the **starter** plan and scale as needed.
-- Never commit `DATABASE_URL`; use Fly secrets only.
+```powershell
+fly deploy --app lotus-ledger
+```
+
+Health check should show `"database": "connected"`.
+
+## Step 5 — App secrets (integrations)
+
+Set production secrets as you need them — for example:
+
+```powershell
+fly secrets set `
+  APP_URL=https://lotus-ledger.fly.dev `
+  SESSION_SECRET=your-long-random-string `
+  QUICKBOOKS_CLIENT_ID=... `
+  QUICKBOOKS_CLIENT_SECRET=... `
+  QUICKBOOKS_ENVIRONMENT=production `
+  STRIPE_SECRET_KEY=... `
+  --app lotus-ledger
+```
+
+Register `https://lotus-ledger.fly.dev/integrations/quickbooks/callback` in the Intuit developer portal.
+
+## Local dev with Fly Postgres (optional)
+
+Proxy to the remote database:
+
+```powershell
+fly mpg proxy <CLUSTER_ID>
+```
+
+Put the proxied URL in `.env` as `DATABASE_URL`, then:
+
+```powershell
+npm run db:migrate
+```
+
+## Drizzle commands (only when `DATABASE_URL` exists)
+
+| Command | When |
+|---------|------|
+| `npm run db:generate` | After changing `app/db/schema.ts` |
+| `npm run db:migrate` | Against a real Postgres (Fly or local) |
+| `npm run db:studio` | Browse data (dev only) |
+
+## Useful commands
+
+```powershell
+fly status --app lotus-ledger
+fly logs --app lotus-ledger
+fly ssh console --app lotus-ledger
+fly mpg connect --org aptim-solutions
+```
 
 ## Troubleshooting
 
-| Issue | What to check |
-|-------|----------------|
-| Health check failing | `fly logs --app lotus-ledger`; confirm `GET /health` returns 200 |
-| 502 / connection refused | `internal_port` and `PORT` must both be `3000` |
-| Database not configured | Run `fly mpg attach` and redeploy |
-| Build fails | Run `docker build -t lotus-ledger .` locally to reproduce |
+| Problem | Fix |
+|---------|-----|
+| `lotus-ledger` already taken | Pick another name and update `app` in `fly.toml` |
+| Release command fails | Postgres not attached, or `DATABASE_URL` missing |
+| Health 503 database error | Run step 4 after attach |
+| Build fails locally | `docker build -t lotus-ledger .` |
+
+## Next: authentication
+
+Auth is **not** deployed yet. After Fly + Drizzle migrations are working, we add login using the `users` / `sessions` tables in the Drizzle schema.

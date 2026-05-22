@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import "dotenv/config";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
@@ -11,17 +10,17 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-const sql = postgres(databaseUrl, {
-  ssl:
-    databaseUrl.includes("localhost") || databaseUrl.includes("127.0.0.1")
+const useSsl =
+  databaseUrl.includes("localhost") || databaseUrl.includes("127.0.0.1")
+    ? false
+    : databaseUrl.includes("sslmode=disable")
       ? false
-      : "require",
-});
+      : "require";
 
-const migrationPath = join(__dirname, "../db/migrations/001_stripe_connections.sql");
-const migration = readFileSync(migrationPath, "utf8");
+const client = postgres(databaseUrl, { max: 1, ssl: useSsl });
+const db = drizzle(client);
 
-await sql.unsafe(migration);
-await sql.end();
-
-console.log("Migrations applied successfully.");
+console.log("Running Drizzle migrations...");
+await migrate(db, { migrationsFolder: "./drizzle" });
+await client.end();
+console.log("Migrations complete.");

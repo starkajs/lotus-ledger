@@ -56,15 +56,9 @@ npm run build
 
 ### Fly.io (aptim-solutions)
 
-Lotus Ledger is configured for Fly.io with `fly.toml`, a production `Dockerfile`, and a `/health` check endpoint.
+**Start here:** **[docs/deploy-fly.md](docs/deploy-fly.md)** — create the app → deploy without a DB → create Fly Postgres → attach → run Drizzle migrations → add secrets.
 
-See **[docs/deploy-fly.md](docs/deploy-fly.md)** for step-by-step instructions: launch the app in `aptim-solutions`, create Managed Postgres, attach `DATABASE_URL`, and deploy.
-
-Quick deploy (after Postgres is attached):
-
-```bash
-fly deploy --app lotus-ledger
-```
+Database: **Drizzle** (`app/db/schema.ts`, `drizzle/`). Do not run `db:migrate` until `DATABASE_URL` points at Fly Postgres (or a local proxy).
 
 ### Docker (local or other platforms)
 

@@ -1,22 +1,24 @@
-import postgres from "postgres";
+import { sql } from "drizzle-orm";
+import { getDb } from "~/db";
 import { getDatabaseUrl } from "./env.server";
-
-let sql: ReturnType<typeof postgres> | null = null;
-
-export function getDb() {
-  if (!sql) {
-    const url = getDatabaseUrl();
-    if (!url) {
-      throw new Error("DATABASE_URL is not configured");
-    }
-    sql = postgres(url, {
-      max: 10,
-      ssl: url.includes("localhost") || url.includes("127.0.0.1") ? false : "require",
-    });
-  }
-  return sql;
-}
 
 export function isDatabaseConfigured(): boolean {
   return Boolean(getDatabaseUrl());
+}
+
+export async function checkDatabaseConnection(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  if (!isDatabaseConfigured()) {
+    return { ok: false, error: "not_configured" };
+  }
+  try {
+    const db = getDb();
+    await db.execute(sql`select 1`);
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "connection_failed";
+    return { ok: false, error: message };
+  }
 }

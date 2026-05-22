@@ -50,9 +50,12 @@ export function isQuickBooksConfigured(): boolean {
 }
 
 export function getOAuthStateSecret(): string {
-  return (
-    process.env.SESSION_SECRET?.trim() ||
-    getQuickBooksClientSecret() ||
-    "lotus-ledger-dev-secret"
-  );
+  const secret = process.env.SESSION_SECRET?.trim();
+  if (secret) return secret;
+  const qb = getQuickBooksClientSecret();
+  if (qb) return qb;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("SESSION_SECRET is required in production");
+  }
+  return "lotus-ledger-dev-secret";
 }
