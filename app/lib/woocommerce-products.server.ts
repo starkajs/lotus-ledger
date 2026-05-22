@@ -1,6 +1,10 @@
-import { and, asc, count, eq, ilike, isNotNull, max, or } from "drizzle-orm";
+import { and, asc, count, eq, ilike, inArray, isNotNull, max, or } from "drizzle-orm";
 import { getDb } from "~/db";
-import { products, woocommerceProducts } from "~/db/schema";
+import {
+  products,
+  woocommerceProducts,
+  type WooCommerceOrderLineItem,
+} from "~/db/schema";
 import { getWooCommerceStoreCurrency } from "~/lib/env.server";
 import type { WooCommerceProduct } from "~/lib/woocommerce-api.server";
 import { parseWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
@@ -332,6 +336,152 @@ export async function setWooCommerceProductLotusLink(
     .where(eq(woocommerceProducts.id, woocommerceProductId));
 
   return getWooCommerceProductById(woocommerceProductId);
+}
+
+export type OrderLineSkuStatus = "no_sku" | "wc_deleted" | "wc_unmapped" | "mapped";
+
+export type OrderLineSkuLookup = {
+  lineId: number;
+  sku: string | null;
+  status: OrderLineSkuStatus;
+  wcProductInternalId: string | null;
+  wcProductName: string | null;
+  lotusProduct: {
+    catalogProductId: string;
+    code: string;
+    name: string;
+  } | null;
+};
+
+type CatalogLookupRow = {
+  internalId: string;
+  wcProductId: number;
+  name: string;
+  sku: string | null;
+  catalogProductId: string | null;
+  catalogCode: string | null;
+  catalogName: string | null;
+};
+
+const catalogLookupSelect = {
+  internalId: woocommerceProducts.id,
+  wcProductId: woocommerceProducts.wcProductId,
+  name: woocommerceProducts.name,
+  sku: woocommerceProducts.sku,
+  catalogProductId: products.id,
+  catalogCode: products.code,
+  catalogName: products.name,
+};
+
+function lotusFromCatalogRow(row: CatalogLookupRow) {
+  if (!row.catalogProductId || !row.catalogCode) return null;
+  return {
+    catalogProductId: row.catalogProductId,
+    code: row.catalogCode,
+    name: row.catalogName ?? row.catalogCode,
+  };
+}
+
+/** Resolve each order line against synced WC products (by SKU, then WC product id). */
+export async function lookupOrderLineItemsInWooCommerceCatalog(
+  lineItems: WooCommerceOrderLineItem[],
+): Promise<OrderLineSkuLookup[]> {
+  const skus = [
+    ...new Set(
+      lineItems
+        .map((line) => line.sku?.trim())
+        .filter((sku): sku is string => Boolean(sku)),
+    ),
+  ];
+  const wcProductIds = [
+    ...new Set(
+      lineItems
+        .map((line) => line.productId)
+        .filter((id): id is number => id != null && id > 0),
+    ),
+  ];
+
+  const db = getDb();
+  const [bySkuRows, byWcIdRows] = await Promise.all([
+    skus.length > 0
+      ? db
+          .select(catalogLookupSelect)
+          .from(woocommerceProducts)
+          .leftJoin(products, eq(woocommerceProducts.productId, products.id))
+          .where(inArray(woocommerceProducts.sku, skus))
+      : Promise.resolve([] as CatalogLookupRow[]),
+    wcProductIds.length > 0
+      ? db
+          .select(catalogLookupSelect)
+          .from(woocommerceProducts)
+          .leftJoin(products, eq(woocommerceProducts.productId, products.id))
+          .where(inArray(woocommerceProducts.wcProductId, wcProductIds))
+      : Promise.resolve([] as CatalogLookupRow[]),
+  ]);
+
+  const skuMap = new Map<string, CatalogLookupRow>();
+  for (const row of bySkuRows) {
+    const key = row.sku?.trim();
+    if (!key) continue;
+    const prev = skuMap.get(key);
+    if (!prev || (!prev.catalogProductId && row.catalogProductId)) {
+      skuMap.set(key, row);
+    }
+  }
+
+  const wcIdMap = new Map(byWcIdRows.map((row) => [row.wcProductId, row]));
+
+  return lineItems.map((line) => {
+    const sku = line.sku?.trim() || null;
+    const catalogRow =
+      (sku ? skuMap.get(sku) : undefined) ??
+      (line.productId != null && line.productId > 0
+        ? wcIdMap.get(line.productId)
+        : undefined);
+
+    if (!sku && (line.productId == null || line.productId <= 0)) {
+      return {
+        lineId: line.id,
+        sku: null,
+        status: "no_sku" as const,
+        wcProductInternalId: null,
+        wcProductName: null,
+        lotusProduct: null,
+      };
+    }
+
+    if (!catalogRow) {
+      return {
+        lineId: line.id,
+        sku,
+        status: "wc_deleted" as const,
+        wcProductInternalId: null,
+        wcProductName: null,
+        lotusProduct: null,
+      };
+    }
+
+    const lotusProduct = lotusFromCatalogRow(catalogRow);
+    if (!lotusProduct) {
+      return {
+        lineId: line.id,
+        sku,
+        status: "wc_unmapped" as const,
+        wcProductInternalId: catalogRow.internalId,
+        wcProductName: catalogRow.name,
+        lotusProduct: null,
+      };
+    }
+
+    return {
+      lineId: line.id,
+      sku,
+      status: "mapped" as const,
+      wcProductInternalId: catalogRow.internalId,
+      wcProductName: catalogRow.name,
+      lotusProduct,
+    };
+  });
 }
 
 export async function syncWooCommerceProductsFromApi(): Promise<{

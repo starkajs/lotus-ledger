@@ -1,20 +1,33 @@
-import { asc, count, desc, eq, max } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, lt, max, sql } from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   communityMembers,
+  products,
   woocommerceOrders,
+  woocommerceProducts,
   type WooCommerceOrderLineItem,
 } from "~/db/schema";
 import {
   billingAddressFromWooCommerce,
   ensureCommunityMemberForEmail,
 } from "~/lib/community-members.server";
+import {
+  dateRangeToCreatedBounds,
+  type IsoDateString,
+} from "~/lib/date-range-filters";
 import type { WooCommerceOrder } from "~/lib/woocommerce-api.server";
 import { parseWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
 
 export const WOOCOMMERCE_ORDERS_PAGE_SIZE = 50;
 
 export const WOOCOMMERCE_ORDER_SYNC_DAYS = 90;
+
+export type WooCommerceOrderLotusProduct = {
+  catalogProductId: string;
+  code: string;
+  name: string;
+  source: "manual" | "line";
+};
 
 export type WooCommerceOrderRecord = {
   id: string;
@@ -48,6 +61,10 @@ export type WooCommerceOrderRecord = {
   communityMemberId: string | null;
   memberEmail: string | null;
   memberName: string | null;
+  /** Manual Lotus catalog assignment (persisted). */
+  productId: string | null;
+  /** Lotus products from manual assignment and/or mapped WC line items. */
+  lotusProducts: WooCommerceOrderLotusProduct[];
   syncedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -109,7 +126,8 @@ function buildLineSummary(items: WooCommerceOrderLineItem[]): string | null {
   if (items.length === 0) return null;
   const parts = items.slice(0, 4).map((item) => {
     const qty = item.quantity > 1 ? `${item.quantity}× ` : "";
-    return `${qty}${item.name}`;
+    const sku = item.sku ? ` [${item.sku}]` : "";
+    return `${qty}${item.name}${sku}`;
   });
   const suffix = items.length > 4 ? ` (+${items.length - 4} more)` : "";
   return parts.join(", ") + suffix;
@@ -203,6 +221,8 @@ function rowToRecord(
     communityMemberId: row.communityMemberId,
     memberEmail: member?.email ?? row.billingEmail,
     memberName: member?.name ?? null,
+    productId: row.productId,
+    lotusProducts: [],
     syncedAt: row.syncedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -293,9 +313,52 @@ export async function linkWooCommerceOrderToMember(
 
 export type ListWooCommerceOrdersOptions = {
   status?: string;
+  dateFrom?: IsoDateString | null;
+  dateTo?: IsoDateString | null;
+  /** Only orders with no line item linked to a Lotus catalog product. */
+  lotusProductMissing?: boolean;
   page?: number;
   pageSize?: number;
 };
+
+/** Order has ≥1 line whose WC product is mapped to a Lotus catalog product. */
+const orderHasMappedLotusProduct = sql`exists (
+  select 1
+  from jsonb_array_elements(coalesce(${woocommerceOrders.lineItems}, '[]'::jsonb)) as line(elem)
+  inner join ${woocommerceProducts} wp
+    on wp.wc_product_id = (line.elem->>'productId')::int
+  where wp.product_id is not null
+    and coalesce((line.elem->>'productId')::int, 0) > 0
+)`;
+
+function buildWooCommerceOrdersWhere(options: ListWooCommerceOrdersOptions) {
+  const filters = [];
+
+  if (options.status && options.status !== "all") {
+    filters.push(eq(woocommerceOrders.status, options.status));
+  }
+
+  const { createdGte, createdLt } = dateRangeToCreatedBounds({
+    from: options.dateFrom ?? null,
+    to: options.dateTo ?? null,
+  });
+  if (createdGte) {
+    filters.push(gte(woocommerceOrders.dateCreated, createdGte));
+  }
+  if (createdLt) {
+    filters.push(lt(woocommerceOrders.dateCreated, createdLt));
+  }
+
+  if (options.lotusProductMissing) {
+    filters.push(
+      sql`not (${orderHasMappedLotusProduct} or ${woocommerceOrders.productId} is not null)`,
+    );
+  }
+
+  if (filters.length === 0) return undefined;
+  if (filters.length === 1) return filters[0];
+  return and(...filters);
+}
 
 export type ListWooCommerceOrdersDbResult = {
   configured: boolean;
@@ -308,6 +371,90 @@ export type ListWooCommerceOrdersDbResult = {
   lastSyncedAt: string | null;
 };
 
+async function attachLotusProductsToOrders(
+  orders: WooCommerceOrderRecord[],
+): Promise<WooCommerceOrderRecord[]> {
+  const wcProductIds = new Set<number>();
+  const manualProductIds = new Set<string>();
+  for (const order of orders) {
+    if (order.productId) manualProductIds.add(order.productId);
+    for (const line of order.lineItems) {
+      if (line.productId != null && line.productId > 0) {
+        wcProductIds.add(line.productId);
+      }
+    }
+  }
+
+  if (wcProductIds.size === 0 && manualProductIds.size === 0) {
+    return orders;
+  }
+
+  const db = getDb();
+  const [mappings, manualRows] = await Promise.all([
+    wcProductIds.size > 0
+      ? db
+          .select({
+            wcProductId: woocommerceProducts.wcProductId,
+            catalogProductId: products.id,
+            code: products.code,
+            name: products.name,
+          })
+          .from(woocommerceProducts)
+          .innerJoin(products, eq(woocommerceProducts.productId, products.id))
+          .where(inArray(woocommerceProducts.wcProductId, [...wcProductIds]))
+      : Promise.resolve([]),
+    manualProductIds.size > 0
+      ? db
+          .select({
+            id: products.id,
+            code: products.code,
+            name: products.name,
+          })
+          .from(products)
+          .where(inArray(products.id, [...manualProductIds]))
+      : Promise.resolve([]),
+  ]);
+
+  const byWcProductId = new Map(
+    mappings.map((m) => [m.wcProductId, m]),
+  );
+  const byCatalogId = new Map(
+    manualRows.map((p) => [p.id, p]),
+  );
+
+  return orders.map((order) => {
+    const seen = new Set<string>();
+    const lotusProducts: WooCommerceOrderLotusProduct[] = [];
+
+    if (order.productId) {
+      const manual = byCatalogId.get(order.productId);
+      if (manual) {
+        seen.add(manual.id);
+        lotusProducts.push({
+          catalogProductId: manual.id,
+          code: manual.code,
+          name: manual.name,
+          source: "manual",
+        });
+      }
+    }
+
+    for (const line of order.lineItems) {
+      if (line.productId == null || line.productId <= 0) continue;
+      const link = byWcProductId.get(line.productId);
+      if (!link || seen.has(link.catalogProductId)) continue;
+      seen.add(link.catalogProductId);
+      lotusProducts.push({
+        catalogProductId: link.catalogProductId,
+        code: link.code,
+        name: link.name,
+        source: "line",
+      });
+    }
+    return { ...order, lotusProducts };
+  });
+}
+
 export async function listWooCommerceOrdersFromDb(
   options: ListWooCommerceOrdersOptions = {},
 ): Promise<ListWooCommerceOrdersDbResult> {
@@ -318,15 +465,12 @@ export async function listWooCommerceOrdersFromDb(
   const page = Math.max(1, options.page ?? 1);
   const db = getDb();
 
-  const statusFilter =
-    options.status && options.status !== "all"
-      ? eq(woocommerceOrders.status, options.status)
-      : undefined;
+  const whereClause = buildWooCommerceOrdersWhere(options);
 
   const [{ value: total }] = await db
     .select({ value: count() })
     .from(woocommerceOrders)
-    .where(statusFilter);
+    .where(whereClause);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -343,7 +487,7 @@ export async function listWooCommerceOrdersFromDb(
       communityMembers,
       eq(woocommerceOrders.communityMemberId, communityMembers.id),
     )
-    .where(statusFilter)
+    .where(whereClause)
     .orderBy(desc(woocommerceOrders.dateCreated))
     .limit(pageSize)
     .offset(offset);
@@ -352,15 +496,19 @@ export async function listWooCommerceOrdersFromDb(
     .select({ lastSyncedAt: max(woocommerceOrders.syncedAt) })
     .from(woocommerceOrders);
 
-  return {
-    configured: isWooCommerceConfigured(),
-    siteUrl: getWooCommerceSiteUrl() ?? null,
-    orders: rows.map((row) =>
+  const orders = await attachLotusProductsToOrders(
+    rows.map((row) =>
       rowToRecord(row.order, {
         email: row.memberEmail,
         name: row.memberName,
       }),
     ),
+  );
+
+  return {
+    configured: isWooCommerceConfigured(),
+    siteUrl: getWooCommerceSiteUrl() ?? null,
+    orders,
     total,
     page: safePage,
     pageSize,
@@ -388,10 +536,39 @@ export async function getWooCommerceOrderById(
     .limit(1);
 
   if (!row) return null;
-  return rowToRecord(row.order, {
-    email: row.memberEmail,
-    name: row.memberName,
-  });
+  const [order] = await attachLotusProductsToOrders([
+    rowToRecord(row.order, {
+      email: row.memberEmail,
+      name: row.memberName,
+    }),
+  ]);
+  return order ?? null;
+}
+
+export async function setWooCommerceOrderLotusProduct(
+  orderId: string,
+  productId: string | null,
+): Promise<WooCommerceOrderRecord | null> {
+  const db = getDb();
+  const now = new Date();
+
+  if (productId) {
+    const [catalogProduct] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.id, productId))
+      .limit(1);
+    if (!catalogProduct) {
+      throw new Error("Lotus product not found");
+    }
+  }
+
+  await db
+    .update(woocommerceOrders)
+    .set({ productId, updatedAt: now })
+    .where(eq(woocommerceOrders.id, orderId));
+
+  return getWooCommerceOrderById(orderId);
 }
 
 export async function listDistinctWooCommerceOrderStatuses(): Promise<string[]> {

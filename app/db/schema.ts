@@ -361,6 +361,10 @@ export const woocommerceOrders = pgTable(
       () => communityMembers.id,
       { onDelete: "set null" },
     ),
+    /** Manual Lotus catalog product when line items cannot be mapped (e.g. deleted WC product). */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

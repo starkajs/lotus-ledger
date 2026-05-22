@@ -162,6 +162,13 @@
       "when": 1781600000000,
       "tag": "0022_woocommerce_product_lotus_link",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1781700000000,
+      "tag": "0023_woocommerce_order_lotus_product",
+      "breakpoints": true
     }
   ]
 }
