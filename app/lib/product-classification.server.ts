@@ -63,6 +63,24 @@ function metadataString(value: unknown): string | null {
   }
 }
 
+/**
+ * Read a dedicated SKU from expanded charge metadata when Stripe adds it.
+ * Does not parse line_items_summary; use sku match rules for bracket codes.
+ */
+export function extractSkuFromStripeRaw(
+  stripeRaw: Record<string, unknown> | null | undefined,
+): string | null {
+  const charge = chargeFromRaw(stripeRaw ?? null);
+  if (!charge) return null;
+  const metadata = asRecord(charge.metadata);
+  if (!metadata) return null;
+  return (
+    metadataString(metadata.sku) ??
+    metadataString(metadata.SKU) ??
+    metadataString(metadata["product_sku"])
+  );
+}
+
 function chargeFromRaw(raw: Record<string, unknown> | null): Record<string, unknown> | null {
   if (!raw) return null;
   const source = raw.source;
@@ -78,6 +96,7 @@ function chargeFromRaw(raw: Record<string, unknown> | null): Record<string, unkn
 export function collectClassificationText(input: {
   description?: string | null;
   stripeRaw?: Record<string, unknown> | null;
+  sku?: string | null;
 }): ClassificationText[] {
   const texts: ClassificationText[] = [];
   const seen = new Set<string>();
@@ -92,6 +111,7 @@ export function collectClassificationText(input: {
   }
 
   add("balance_description", input.description ?? null);
+  add("sku", input.sku ?? extractSkuFromStripeRaw(input.stripeRaw));
 
   const charge = chargeFromRaw(input.stripeRaw ?? null);
   if (charge) {
@@ -118,6 +138,56 @@ export function collectClassificationText(input: {
   }
 
   return texts;
+}
+
+/** Text fields from Stripe used for product classification (detail page). */
+export type StripeTransactionProductSignals = {
+  /** Charge description if expanded, otherwise balance transaction description. */
+  description: string | null;
+  balanceDescription: string | null;
+  chargeDescription: string | null;
+  lineItem1: string | null;
+  lineItemsSummary: string | null;
+  sku: string | null;
+};
+
+export function extractStripeTransactionProductSignals(input: {
+  stripeRaw?: Record<string, unknown> | null;
+  description?: string | null;
+  sku?: string | null;
+}): StripeTransactionProductSignals {
+  const raw = input.stripeRaw ?? null;
+  const balanceFromRaw =
+    raw && typeof raw.description === "string" ? raw.description.trim() : null;
+  const balanceDescription =
+    balanceFromRaw || input.description?.trim() || null;
+
+  const charge = chargeFromRaw(raw);
+  const chargeDescription = charge
+    ? metadataString(charge.description)
+    : null;
+
+  let lineItem1: string | null = null;
+  let lineItemsSummary: string | null = null;
+  if (charge) {
+    const metadata = asRecord(charge.metadata);
+    if (metadata) {
+      lineItem1 = metadataString(metadata["Line Item 1"]);
+      lineItemsSummary = metadataString(metadata["line_items_summary"]);
+    }
+  }
+
+  const description = chargeDescription ?? balanceDescription;
+  const sku = input.sku?.trim() || extractSkuFromStripeRaw(raw);
+
+  return {
+    description,
+    balanceDescription,
+    chargeDescription,
+    lineItem1,
+    lineItemsSummary,
+    sku,
+  };
 }
 
 function textsForField(
@@ -243,6 +313,7 @@ export async function classifyStripeTransactionById(
   const texts = collectClassificationText({
     description: row.description,
     stripeRaw: row.stripeRaw,
+    sku: row.sku,
   });
   const rules = await listActiveProductMatchRules();
   const result = evaluateProductMatch(texts, rules);

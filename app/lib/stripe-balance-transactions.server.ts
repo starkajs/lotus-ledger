@@ -7,7 +7,10 @@ import {
   stripeBalanceTransactions,
   stripeConnections,
 } from "~/db/schema";
-import type { ProductMatchStatus } from "./product-classification.server";
+import {
+  extractSkuFromStripeRaw,
+  type ProductMatchStatus,
+} from "./product-classification.server";
 
 export const STRIPE_TRANSACTIONS_PAGE_SIZE = 50;
 
@@ -22,6 +25,7 @@ export type StripeBalanceTransactionRecord = {
   type: string;
   status: string;
   description: string | null;
+  sku: string | null;
   sourceId: string | null;
   reportingCategory: string | null;
   availableOn: string | null;
@@ -61,6 +65,7 @@ export type UpsertStripeBalanceTransactionInput = {
   stripeCustomerId?: string | null;
   communityMemberId?: string | null;
   stripeRaw: Record<string, unknown>;
+  sku?: string | null;
 };
 
 /** Serializable copy of the Stripe API object. */
@@ -105,6 +110,7 @@ export function mapStripeBalanceTransaction(
     communityMemberId?: string | null;
   },
 ): UpsertStripeBalanceTransactionInput {
+  const stripeRaw = serializeStripeBalanceTransactionRaw(tx);
   return {
     stripeConnectionId: connectionId,
     stripeBalanceTransactionId: tx.id,
@@ -123,7 +129,8 @@ export function mapStripeBalanceTransaction(
     stripeCreatedAt: new Date(tx.created * 1000),
     stripeCustomerId: member?.stripeCustomerId ?? null,
     communityMemberId: member?.communityMemberId ?? null,
-    stripeRaw: serializeStripeBalanceTransactionRaw(tx),
+    stripeRaw,
+    sku: extractSkuFromStripeRaw(stripeRaw),
   };
 }
 
@@ -147,6 +154,7 @@ function rowToRecord(
     type: row.type,
     status: row.status,
     description: row.description,
+    sku: row.sku,
     sourceId: row.sourceId,
     reportingCategory: row.reportingCategory,
     availableOn: row.availableOn?.toISOString() ?? null,
@@ -215,6 +223,7 @@ export async function upsertStripeBalanceTransaction(
         availableOn: input.availableOn ?? null,
         stripeCreatedAt: input.stripeCreatedAt,
         stripeRaw: input.stripeRaw,
+        sku: input.sku ?? null,
         ...memberFields,
         updatedAt: now,
       })
@@ -240,6 +249,7 @@ export async function upsertStripeBalanceTransaction(
       availableOn: input.availableOn ?? null,
       stripeCreatedAt: input.stripeCreatedAt,
       stripeRaw: input.stripeRaw,
+      sku: input.sku ?? null,
       ...memberFields,
     })
     .returning({ id: stripeBalanceTransactions.id });

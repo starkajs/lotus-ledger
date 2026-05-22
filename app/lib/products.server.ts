@@ -114,6 +114,31 @@ export async function updateProduct(
   return row ? productRowToRecord(row) : null;
 }
 
+export async function getProductMatchRuleById(
+  id: string,
+): Promise<ProductMatchRuleRow | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      id: productMatchRules.id,
+      productId: productMatchRules.productId,
+      productCode: products.code,
+      productName: products.name,
+      priority: productMatchRules.priority,
+      field: productMatchRules.field,
+      matchType: productMatchRules.matchType,
+      pattern: productMatchRules.pattern,
+      caseInsensitive: productMatchRules.caseInsensitive,
+      isActive: productMatchRules.isActive,
+    })
+    .from(productMatchRules)
+    .innerJoin(products, eq(productMatchRules.productId, products.id))
+    .where(eq(productMatchRules.id, id))
+    .limit(1);
+
+  return row ?? null;
+}
+
 export async function listProductMatchRules(): Promise<ProductMatchRuleRow[]> {
   const db = getDb();
   const rows = await db

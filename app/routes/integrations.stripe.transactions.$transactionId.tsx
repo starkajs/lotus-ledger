@@ -7,9 +7,10 @@ import { formatMoneyMinor } from "~/lib/money";
 import {
   canPushTransactionToQuickbooks,
   classifyStripeTransactionById,
+  extractStripeTransactionProductSignals,
   setStripeTransactionProductManual,
 } from "~/lib/product-classification.server";
-import { listProducts } from "~/lib/products.server";
+import { getProductMatchRuleById, listProducts } from "~/lib/products.server";
 import { getStripeBalanceTransactionById } from "~/lib/stripe-balance-transactions.server";
 import { requireUser } from "~/lib/session.server";
 
@@ -36,6 +37,26 @@ function DetailRow({
   );
 }
 
+function MultilineText({ value }: { value: string | null | undefined }) {
+  if (!value?.trim()) {
+    return <span className="text-ink-faint">—</span>;
+  }
+  return (
+    <span className="whitespace-pre-wrap break-words text-dark">{value}</span>
+  );
+}
+
+function formatMatchedRuleLabel(rule: {
+  priority: number;
+  field: string;
+  matchType: string;
+  pattern: string;
+  productCode: string;
+  productName: string;
+}) {
+  return `Priority ${rule.priority} · ${rule.field} · ${rule.matchType} · “${rule.pattern}” → ${rule.productCode} (${rule.productName})`;
+}
+
 export function meta({ data }: Route.MetaArgs) {
   const id = data?.tx.stripeBalanceTransactionId ?? "Transaction";
   return [
@@ -54,6 +75,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const products = await listProducts({ activeOnly: true });
   const pushCheck = canPushTransactionToQuickbooks(tx);
+  const productSignals = extractStripeTransactionProductSignals({
+    stripeRaw: tx.stripeRaw,
+    description: tx.description,
+    sku: tx.sku,
+  });
+  const matchedRule = tx.productMatchRuleId
+    ? await getProductMatchRuleById(tx.productMatchRuleId)
+    : null;
 
   const url = new URL(request.url);
   const returnTo =
@@ -66,6 +95,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return {
     tx,
     products,
+    productSignals,
+    matchedRule,
     pushCheck,
     returnTo,
     stripeDashboardUrl: `${stripeDashboardHost}/balance/all-activity`,
@@ -102,7 +133,15 @@ export default function StripeTransactionDetailPage({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { tx, products, pushCheck, returnTo, stripeDashboardUrl } = loaderData;
+  const {
+    tx,
+    products,
+    productSignals,
+    matchedRule,
+    pushCheck,
+    returnTo,
+    stripeDashboardUrl,
+  } = loaderData;
   const location = useLocation();
   const postAction = location.pathname + location.search;
 
@@ -171,6 +210,19 @@ export default function StripeTransactionDetailPage({
         {actionData?.scope === "product" && actionData.error && (
           <p className="mt-2 text-sm text-maroon">{actionData.error}</p>
         )}
+        <DetailRow label="Matched by rule">
+          {tx.productMatchStatus === "manual" ? (
+            <span className="text-ink-muted">Manual assignment (no rule)</span>
+          ) : matchedRule ? (
+            <span className="text-sm text-dark">
+              {formatMatchedRuleLabel(matchedRule)}
+            </span>
+          ) : tx.productMatchStatus === "ambiguous" ? (
+            <span className="text-amber-700">Ambiguous — multiple rules matched</span>
+          ) : (
+            <span className="text-ink-faint">—</span>
+          )}
+        </DetailRow>
         <p className="mt-3 text-xs text-ink-muted">
           QuickBooks push:{" "}
           {pushCheck.ok ? (
@@ -179,6 +231,42 @@ export default function StripeTransactionDetailPage({
             <span className="text-maroon">{pushCheck.reason}</span>
           )}
         </p>
+      </div>
+
+      <div className="mt-4 rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay px-4 py-4 sm:px-6">
+        <h2 className="text-sm font-medium text-dark">
+          Stripe text used for classification
+        </h2>
+        <p className="mt-1 text-xs text-ink-muted">
+          From the synced balance transaction and expanded charge metadata.
+        </p>
+        <dl className="mt-3">
+          <DetailRow label="Description">
+            <MultilineText value={productSignals.description} />
+          </DetailRow>
+          {productSignals.chargeDescription &&
+            productSignals.chargeDescription !==
+              productSignals.balanceDescription && (
+              <DetailRow label="Balance description">
+                <MultilineText value={productSignals.balanceDescription} />
+              </DetailRow>
+            )}
+          <DetailRow label="Line Item 1">
+            <MultilineText value={productSignals.lineItem1} />
+          </DetailRow>
+          <DetailRow label="Line items summary">
+            <MultilineText value={productSignals.lineItemsSummary} />
+          </DetailRow>
+          <DetailRow label="SKU">
+            <MultilineText value={productSignals.sku} />
+            {!productSignals.sku && (
+              <p className="mt-1 text-xs text-ink-faint">
+                Not provided by Stripe yet; stored when charge metadata includes
+                sku, SKU, or product_sku.
+              </p>
+            )}
+          </DetailRow>
+        </dl>
       </div>
 
       <div className="mt-4 rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay px-4 py-4 sm:px-6">
@@ -228,7 +316,9 @@ export default function StripeTransactionDetailPage({
           <DetailRow label="Status">
             <span className="capitalize">{tx.status}</span>
           </DetailRow>
-          <DetailRow label="Description">{tx.description ?? "—"}</DetailRow>
+          <DetailRow label="Description (stored)">
+            <MultilineText value={tx.description} />
+          </DetailRow>
           <DetailRow label="Reporting category">
             {tx.reportingCategory ?? "—"}
           </DetailRow>

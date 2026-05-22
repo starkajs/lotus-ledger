@@ -21,7 +21,7 @@ From balance `description` and expanded charge `source` in `stripe_raw`:
 
 - `balance_description`, `charge_description`
 - `metadata["Line Item 1"]`, `metadata["line_items_summary"]`, `donorbox_metadata`
-- `metadata_all`, `sku` (from line item fields)
+- `metadata_all`, `sku` (stored `sku` column or charge metadata `sku` / `SKU` / `product_sku` when Stripe adds it; bracket codes in line items remain on the `sku` rule field via line item text)
 
 ## Commands
 

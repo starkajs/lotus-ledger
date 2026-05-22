@@ -167,6 +167,8 @@ export const stripeBalanceTransactions = pgTable(
     ),
     /** Full Stripe Balance Transaction object as returned by the API. */
     stripeRaw: jsonb("stripe_raw").$type<Record<string, unknown>>(),
+    /** Product SKU when Stripe provides it (e.g. charge metadata); null until available. */
+    sku: text(),
     productId: uuid("product_id").references(() => products.id, {
       onDelete: "set null",
     }),
