@@ -1,13 +1,17 @@
 import type { Route } from "./+types/home";
-import { Welcome } from "../welcome/welcome";
+import { LandingPage } from "../components/landing-page";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "New React Router App" },
-    { name: "description", content: "Welcome to React Router!" },
+    { title: "Lotus Ledger — Analytics integration platform" },
+    {
+      name: "description",
+      content:
+        "Connect Stripe, QuickBooks, and WooCommerce for unified financial and commerce analytics.",
+    },
   ];
 }
 
 export default function Home() {
-  return <Welcome />;
+  return <LandingPage />;
 }

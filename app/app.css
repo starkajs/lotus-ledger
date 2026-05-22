@@ -1,15 +1,61 @@
 @import "tailwindcss";
 
+/*
+ * Jamyang London Buddhist Centre brand theme
+ * Sourced from jamyang.co.uk (GeneratePress custom properties)
+ */
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
+  /* Typography */
+  --font-sans: "Poppins", ui-sans-serif, system-ui, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-serif: "Fauna One", ui-serif, Georgia, Cambria, "Times New Roman", Times,
+    serif;
+
+  /* Brand palette */
+  --color-maroon: #a83a2d;
+  --color-maroon-dark: #8a2f24;
+  --color-maroon-light: #c45a4e;
+
+  --color-sand: #f2dcb1;
+  --color-sand-dark: #e8c88a;
+  --color-sand-muted: rgb(242 220 177 / 0.3);
+
+  --color-dark: #2d373c;
+  --color-teal: #3f7587;
+  --color-teal-dark: #2f5a68;
+  --color-mint: #b8e7dd;
+  --color-jade: #019e7c;
+
+  /* Neutrals (GeneratePress contrast / base scale) */
+  --color-ink: #222222;
+  --color-ink-muted: #575760;
+  --color-ink-faint: #b2b2be;
+
+  --color-surface: #f0f0f0;
+  --color-surface-raised: #f7f8f9;
+  --color-surface-overlay: #ffffff;
+
+  /* Layout */
+  --container-jamyang: 87.5rem; /* 1400px — site grid max-width */
+  --radius-jamyang: 0.5rem;
+  --radius-jamyang-lg: 1rem;
+  --radius-jamyang-pill: 9999px;
 }
 
 html,
 body {
-  @apply bg-white dark:bg-gray-950;
+  @apply bg-sand-muted font-sans text-ink antialiased;
 
   @media (prefers-color-scheme: dark) {
-    color-scheme: dark;
+    color-scheme: light;
   }
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  @apply font-serif text-dark;
 }

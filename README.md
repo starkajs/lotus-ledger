@@ -34,6 +34,16 @@ npm run dev
 
 Your application will be available at `http://localhost:5173`.
 
+## Integrations
+
+### Stripe
+
+See **[docs/stripe-setup.md](docs/stripe-setup.md)**. Add `STRIPE_SECRET_KEY` to `.env`, then open `/integrations/stripe` to verify transactions load. Multiple accounts via encrypted DB storage is planned next.
+
+### QuickBooks Online
+
+See **[docs/quickbooks-setup.md](docs/quickbooks-setup.md)**. Intuit requires OAuth (no API key) — create an app in the developer portal, add credentials to `.env`, then **Connect QuickBooks** at `/integrations/quickbooks`.
+
 ## Building for Production
 
 Create a production build:
@@ -44,35 +54,32 @@ npm run build
 
 ## Deployment
 
-### Docker Deployment
+### Fly.io (aptim-solutions)
 
-To build and run using Docker:
+Lotus Ledger is configured for Fly.io with `fly.toml`, a production `Dockerfile`, and a `/health` check endpoint.
+
+See **[docs/deploy-fly.md](docs/deploy-fly.md)** for step-by-step instructions: launch the app in `aptim-solutions`, create Managed Postgres, attach `DATABASE_URL`, and deploy.
+
+Quick deploy (after Postgres is attached):
 
 ```bash
-docker build -t my-app .
-
-# Run the container
-docker run -p 3000:3000 my-app
+fly deploy --app lotus-ledger
 ```
 
-The containerized application can be deployed to any platform that supports Docker, including:
+### Docker (local or other platforms)
 
-- AWS ECS
-- Google Cloud Run
-- Azure Container Apps
-- Digital Ocean App Platform
-- Fly.io
-- Railway
+```bash
+docker build -t lotus-ledger .
+docker run --rm -p 3000:3000 -e PORT=3000 lotus-ledger
+```
 
-### DIY Deployment
+The app listens on port **3000**. Health check: `http://localhost:3000/health`.
 
-If you're familiar with deploying Node applications, the built-in app server is production-ready.
-
-Make sure to deploy the output of `npm run build`
+### Build output
 
 ```
 ├── package.json
-├── package-lock.json (or pnpm-lock.yaml, or bun.lockb)
+├── package-lock.json
 ├── build/
 │   ├── client/    # Static assets
 │   └── server/    # Server-side code
