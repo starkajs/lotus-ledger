@@ -1,48 +1,45 @@
-import { Form, Link, useLocation } from "react-router";
+import { Form, Link, redirect, useLocation } from "react-router";
 import type { Route } from "./+types/integrations.woocommerce.products";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
-import { formatWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
+import { WooCommerceProductsTable } from "~/components/woocommerce-products-table";
+import { listProducts } from "~/lib/products.server";
+import { requireUser } from "~/lib/session.server";
 import {
+  bulkSetWooCommerceProductLotusLinks,
   listDistinctWooCommerceProductStatuses,
   listWooCommerceProductsFromDb,
   syncWooCommerceProductsFromApi,
 } from "~/lib/woocommerce-products.server";
-import { requireUser } from "~/lib/session.server";
 
-function productDetailHref(productId: string, returnTo: string) {
-  const params = new URLSearchParams({ returnTo });
-  return `/integrations/woocommerce/products/${productId}?${params}`;
+type LotusLinkFilter = "all" | "linked" | "unlinked";
+
+function parseLotusLinkFilter(value: string | null): LotusLinkFilter {
+  if (value === "yes") return "linked";
+  if (value === "no") return "unlinked";
+  return "all";
+}
+
+function lotusLinkParam(filter: LotusLinkFilter): string | null {
+  if (filter === "linked") return "yes";
+  if (filter === "unlinked") return "no";
+  return null;
 }
 
 function pageHref(
   page: number,
   q: string,
   status: string,
-  mappedOnly: boolean,
+  lotusLink: LotusLinkFilter,
 ) {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (status !== "all") params.set("status", status);
-  if (mappedOnly) params.set("mapped", "yes");
+  const mapped = lotusLinkParam(lotusLink);
+  if (mapped) params.set("mapped", mapped);
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `?${query}` : "?";
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const published = status === "publish";
-  return (
-    <span
-      className={
-        published
-          ? "inline-flex rounded bg-jade/15 px-1.5 py-0.5 text-[10px] font-medium capitalize text-jade"
-          : "inline-flex rounded bg-sand/80 px-1.5 py-0.5 text-[10px] font-medium capitalize text-ink-muted"
-      }
-    >
-      {status}
-    </span>
-  );
 }
 
 export function meta({}: Route.MetaArgs) {
@@ -58,39 +55,79 @@ export async function loader({ request }: Route.LoaderArgs) {
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
   const q = url.searchParams.get("q")?.trim() ?? "";
   const statusRaw = url.searchParams.get("status")?.trim() ?? "all";
-  const mappedOnly = url.searchParams.get("mapped") === "yes";
+  const lotusLink = parseLotusLinkFilter(url.searchParams.get("mapped"));
 
-  const [list, statuses] = await Promise.all([
+  const [list, statuses, catalogProducts] = await Promise.all([
     listWooCommerceProductsFromDb({
       page,
       q,
       status: statusRaw,
-      mappedOnly,
+      lotusLink,
     }),
     listDistinctWooCommerceProductStatuses(),
+    listProducts(),
   ]);
 
   const status =
     statuses.includes(statusRaw) || statusRaw === "all" ? statusRaw : "all";
 
-  return { ...list, q, status, statuses, mappedOnly };
+  const bulkAssigned = url.searchParams.get("bulkAssigned");
+
+  return {
+    ...list,
+    q,
+    status,
+    statuses,
+    lotusLink,
+    catalogProducts,
+    bulkAssigned,
+  };
 }
 
 export async function action({ request }: Route.ActionArgs) {
   await requireUser(request);
   const form = await request.formData();
-  if (form.get("intent") !== "sync") {
-    return { scope: "sync" as const, error: "Unknown action" };
+  const intent = String(form.get("intent") ?? "");
+  const url = new URL(request.url);
+
+  if (intent === "sync") {
+    try {
+      const result = await syncWooCommerceProductsFromApi();
+      return { scope: "sync" as const, success: true as const, result };
+    } catch (err) {
+      return {
+        scope: "sync" as const,
+        error: err instanceof Error ? err.message : "Sync failed",
+      };
+    }
   }
-  try {
-    const result = await syncWooCommerceProductsFromApi();
-    return { scope: "sync" as const, success: true as const, result };
-  } catch (err) {
-    return {
-      scope: "sync" as const,
-      error: err instanceof Error ? err.message : "Sync failed",
-    };
+
+  if (intent === "bulkAssignLotusProduct") {
+    const wcProductIds = form
+      .getAll("wcProductIds")
+      .map((value) => String(value));
+    const productId = String(form.get("productId") ?? "").trim() || null;
+    try {
+      const result = await bulkSetWooCommerceProductLotusLinks(
+        wcProductIds,
+        productId,
+      );
+      const params = new URLSearchParams(url.searchParams);
+      params.set(
+        "bulkAssigned",
+        productId ? String(result.updated) : `cleared-${result.updated}`,
+      );
+      const query = params.toString();
+      return redirect(query ? `${url.pathname}?${query}` : url.pathname);
+    } catch (err) {
+      return {
+        scope: "bulkAssign" as const,
+        error: err instanceof Error ? err.message : "Bulk assign failed",
+      };
+    }
   }
+
+  return { scope: "unknown" as const, error: "Unknown action" };
 }
 
 export default function WooCommerceProductsPage({
@@ -111,13 +148,19 @@ export default function WooCommerceProductsPage({
     q,
     status,
     statuses,
-    mappedOnly,
+    lotusLink,
+    catalogProducts,
+    bulkAssigned,
   } = loaderData;
 
   const syncResult =
     actionData?.scope === "sync" && actionData.success ? actionData.result : null;
   const syncError =
     actionData?.scope === "sync" && actionData.error ? actionData.error : null;
+  const bulkAssignError =
+    actionData?.scope === "bulkAssign" && actionData.error
+      ? actionData.error
+      : null;
 
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, total);
@@ -169,6 +212,25 @@ export default function WooCommerceProductsPage({
               updated.
             </p>
           )}
+          {bulkAssignError && (
+            <p className="mb-3 text-sm text-maroon" role="alert">
+              {bulkAssignError}
+            </p>
+          )}
+          {bulkAssigned && (
+            <p className="mb-3 text-sm text-jade">
+              {(() => {
+                const cleared = bulkAssigned.startsWith("cleared-");
+                const count = Number(
+                  cleared ? bulkAssigned.slice("cleared-".length) : bulkAssigned,
+                );
+                const label = count === 1 ? "product" : "products";
+                return cleared
+                  ? `Cleared Lotus link on ${count} ${label}.`
+                  : `Assigned Lotus product to ${count} ${label}.`;
+              })()}
+            </p>
+          )}
 
           <form method="get" className="flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-0.5 text-xs">
@@ -195,15 +257,17 @@ export default function WooCommerceProductsPage({
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-2 pb-1.5 text-xs text-ink-muted">
-              <input
-                type="checkbox"
+            <label className="flex flex-col gap-0.5 text-xs">
+              <span className="text-ink-muted">Lotus product</span>
+              <select
                 name="mapped"
-                value="yes"
-                defaultChecked={mappedOnly}
-                className="rounded border-sand-dark/60"
-              />
-              Linked to Lotus product
+                defaultValue={lotusLinkParam(lotusLink) ?? ""}
+                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[10rem]"
+              >
+                <option value="">All</option>
+                <option value="yes">Linked</option>
+                <option value="no">Not linked</option>
+              </select>
             </label>
             <button
               type="submit"
@@ -215,12 +279,17 @@ export default function WooCommerceProductsPage({
 
           <p className="mt-3 text-xs text-ink-muted">
             {total === 0
-              ? mappedOnly
+              ? lotusLink === "linked"
                 ? "No products linked to a Lotus product."
-                : "No products synced yet."
+                : lotusLink === "unlinked"
+                  ? "No unlinked products — everything has a Lotus product."
+                  : "No products synced yet."
               : `${total} product${total === 1 ? "" : "s"}`}
-            {mappedOnly && total > 0 && (
-              <span className="text-ink-faint"> · linked to Lotus only</span>
+            {lotusLink === "linked" && total > 0 && (
+              <span className="text-ink-faint"> · linked only</span>
+            )}
+            {lotusLink === "unlinked" && total > 0 && (
+              <span className="text-ink-faint"> · not linked only</span>
             )}
             {total > 0 && (
               <span className="text-ink-faint">
@@ -232,119 +301,20 @@ export default function WooCommerceProductsPage({
 
           {products.length === 0 ? (
             <p className="mt-6 text-sm text-ink-muted">
-              {mappedOnly
-                ? "Clear the filter or link products on their detail pages."
-                : "Use Sync from WooCommerce to import your catalog."}
+              {lotusLink === "unlinked"
+                ? "All products are linked, or try clearing filters."
+                : lotusLink === "linked"
+                  ? "Clear the filter or link products on their detail pages."
+                  : "Use Sync from WooCommerce to import your catalog."}
             </p>
           ) : (
             <>
-              <div className="mt-3 overflow-x-auto rounded-jamyang border border-sand-dark/50">
-                <table className="w-full min-w-[48rem] text-left text-xs">
-                  <thead className="bg-surface text-dark">
-                    <tr>
-                      <th className="px-2 py-1.5 font-medium">Name</th>
-                      <th className="px-2 py-1.5 font-medium">SKU</th>
-                      <th className="px-2 py-1.5 font-medium">Type</th>
-                      <th className="px-2 py-1.5 font-medium">Status</th>
-                      <th className="px-2 py-1.5 font-medium text-right">Price</th>
-                      <th className="px-2 py-1.5 font-medium">Stock</th>
-                      <th className="px-2 py-1.5 font-medium">Categories</th>
-                      <th className="px-2 py-1.5 font-medium">Lotus product</th>
-                      <th className="px-2 py-1.5 font-medium">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-surface-overlay">
-                    {products.map((product) => (
-                      <tr
-                        key={product.id}
-                        className="border-b border-sand-dark/30 align-top hover:bg-sand/20"
-                      >
-                        <td className="px-2 py-1.5">
-                          <Link
-                            to={productDetailHref(product.id, listReturnTo)}
-                            className="font-medium text-teal hover:underline"
-                          >
-                            {product.name}
-                          </Link>
-                          {product.slug && (
-                            <div className="font-mono text-[10px] text-ink-faint">
-                              {product.slug}
-                            </div>
-                          )}
-                          {product.permalink && (
-                            <a
-                              href={product.permalink}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[10px] text-teal hover:underline"
-                            >
-                              View in shop
-                            </a>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 font-mono text-[10px]">
-                          {product.sku ?? "—"}
-                        </td>
-                        <td className="px-2 py-1.5 capitalize text-ink-muted">
-                          {product.type}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <StatusBadge status={product.status} />
-                        </td>
-                        <td className="px-2 py-1.5 text-right font-mono whitespace-nowrap">
-                          {formatWooCommerceMoneyMinor(
-                            product.priceMinor ?? product.regularPriceMinor,
-                            product.currency,
-                          )}
-                          {product.onSale && product.salePriceMinor != null && (
-                            <span className="block text-[10px] text-jade">
-                              Sale{" "}
-                              {formatWooCommerceMoneyMinor(
-                                product.salePriceMinor,
-                                product.currency,
-                              )}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-ink-muted">
-                          {product.stockStatus ?? "—"}
-                          {product.stockQuantity != null && (
-                            <span className="block font-mono text-[10px]">
-                              {product.stockQuantity}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-ink-muted max-w-[12rem]">
-                          {product.categorySummary ?? "—"}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          {product.lotusProduct ? (
-                            <Link
-                              to={productDetailHref(product.id, listReturnTo)}
-                              className="font-mono text-[10px] text-teal hover:underline"
-                              title={product.lotusProduct.name}
-                            >
-                              {product.lotusProduct.code}
-                            </Link>
-                          ) : (
-                            <span className="text-ink-faint">—</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-right">
-                          <Link
-                            to={productDetailHref(product.id, listReturnTo)}
-                            className="inline-flex rounded border border-sand-dark/50 px-2 py-0.5 text-[11px] font-medium text-teal hover:bg-surface"
-                          >
-                            Edit
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <WooCommerceProductsTable
+                products={products}
+                catalogProducts={catalogProducts}
+                listReturnTo={listReturnTo}
+                postAction={postAction}
+              />
 
               {totalPages > 1 && (
                 <nav
@@ -357,7 +327,7 @@ export default function WooCommerceProductsPage({
                   <div className="flex gap-2">
                     {page > 1 ? (
                       <Link
-                        to={pageHref(page - 1, q, status, mappedOnly)}
+                        to={pageHref(page - 1, q, status, lotusLink)}
                         className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1 hover:bg-surface"
                       >
                         Previous
@@ -365,7 +335,7 @@ export default function WooCommerceProductsPage({
                     ) : null}
                     {page < totalPages ? (
                       <Link
-                        to={pageHref(page + 1, q, status, mappedOnly)}
+                        to={pageHref(page + 1, q, status, lotusLink)}
                         className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1 hover:bg-surface"
                       >
                         Next

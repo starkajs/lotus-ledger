@@ -1,4 +1,15 @@
-import { and, asc, count, eq, ilike, inArray, isNotNull, max, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  max,
+  or,
+} from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   products,
@@ -185,11 +196,13 @@ export async function upsertWooCommerceProduct(
   return "created";
 }
 
+export type WooCommerceProductLotusLinkFilter = "all" | "linked" | "unlinked";
+
 export type ListWooCommerceProductsDbOptions = {
   q?: string;
   status?: string;
-  /** When true, only products linked to a Lotus catalog product. */
-  mappedOnly?: boolean;
+  /** Filter by Lotus catalog link on the WC product row. */
+  lotusLink?: WooCommerceProductLotusLinkFilter;
   page?: number;
   pageSize?: number;
 };
@@ -229,11 +242,14 @@ export async function listWooCommerceProductsFromDb(
       ? eq(woocommerceProducts.status, options.status)
       : undefined;
 
-  const mappedFilter = options.mappedOnly
-    ? isNotNull(woocommerceProducts.productId)
-    : undefined;
+  const lotusLinkFilter =
+    options.lotusLink === "linked"
+      ? isNotNull(woocommerceProducts.productId)
+      : options.lotusLink === "unlinked"
+        ? isNull(woocommerceProducts.productId)
+        : undefined;
 
-  const filters = [search, statusFilter, mappedFilter].filter(
+  const filters = [search, statusFilter, lotusLinkFilter].filter(
     (f): f is NonNullable<typeof f> => f != null,
   );
   const whereClause =
@@ -336,6 +352,37 @@ export async function setWooCommerceProductLotusLink(
     .where(eq(woocommerceProducts.id, woocommerceProductId));
 
   return getWooCommerceProductById(woocommerceProductId);
+}
+
+export async function bulkSetWooCommerceProductLotusLinks(
+  woocommerceProductIds: string[],
+  productId: string | null,
+): Promise<{ updated: number }> {
+  const ids = [...new Set(woocommerceProductIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) {
+    throw new Error("Select at least one WooCommerce product");
+  }
+
+  const db = getDb();
+  const now = new Date();
+
+  if (productId) {
+    const [catalogProduct] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.id, productId))
+      .limit(1);
+    if (!catalogProduct) {
+      throw new Error("Lotus product not found");
+    }
+  }
+
+  await db
+    .update(woocommerceProducts)
+    .set({ productId, updatedAt: now })
+    .where(inArray(woocommerceProducts.id, ids));
+
+  return { updated: ids.length };
 }
 
 export type OrderLineSkuStatus = "no_sku" | "wc_deleted" | "wc_unmapped" | "mapped";
