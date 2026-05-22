@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { Form, Link, useLocation } from "react-router";
 import type { Route } from "./+types/integrations.stripe.transactions";
 import { AppPage } from "~/components/app-page";
@@ -10,8 +11,11 @@ import {
 } from "~/lib/stripe-balance-transactions.server";
 import { requireUser } from "~/lib/session.server";
 import { listStripeConnections } from "~/lib/stripe-connections.server";
-import type { ProductMatchStatus } from "~/lib/product-classification.server";
-import { classifyAllStripeTransactions } from "~/lib/product-classification.server";
+import {
+  classifyAllStripeTransactions,
+  extractStripeTransactionProductSignals,
+  type ProductMatchStatus,
+} from "~/lib/product-classification.server";
 import { syncStripeBalanceTransactions } from "~/lib/sync-stripe-transactions.server";
 
 function formatDateShort(iso: string) {
@@ -106,6 +110,40 @@ function MemberCell({ tx }: { tx: StripeBalanceTransactionRecord }) {
 function transactionDetailHref(transactionId: string, returnTo: string) {
   const params = new URLSearchParams({ returnTo });
   return `/integrations/stripe/transactions/${transactionId}?${params}`;
+}
+
+type StripeTextHintField = { label: string; value: string };
+
+function getStripeTextHintFields(
+  tx: StripeBalanceTransactionRecord,
+): StripeTextHintField[] {
+  const signals = extractStripeTransactionProductSignals({
+    stripeRaw: tx.stripeRaw,
+    description: tx.description,
+    sku: tx.sku,
+  });
+
+  return [
+    { label: "Description", value: signals.description },
+    { label: "Line Item 1", value: signals.lineItem1 },
+    { label: "Line items summary", value: signals.lineItemsSummary },
+    { label: "SKU", value: signals.sku },
+  ].filter((f): f is StripeTextHintField => Boolean(f.value));
+}
+
+function StripeTextHints({ fields }: { fields: StripeTextHintField[] }) {
+  return (
+    <div className="space-y-0.5 text-[10px] leading-snug">
+      {fields.map((field) => (
+        <div key={field.label}>
+          <span className="font-medium text-ink-faint">{field.label}: </span>
+          <span className="whitespace-pre-wrap break-words text-ink-muted">
+            {field.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function meta({}: Route.MetaArgs) {
@@ -477,7 +515,7 @@ export default function StripeTransactionsPage({
           ) : (
             <>
               <div className="mt-3 overflow-x-auto rounded-jamyang border border-sand-dark/50">
-                <table className="w-full min-w-[40rem] text-left text-xs">
+                <table className="w-full min-w-[52rem] text-left text-xs">
                   <thead className="bg-surface text-dark">
                     <tr>
                       <th className="px-2 py-1.5 font-medium">Date</th>
@@ -494,56 +532,83 @@ export default function StripeTransactionsPage({
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-sand-dark/30 bg-surface-overlay">
-                    {transactions.map((tx) => (
-                      <tr key={tx.id} className="hover:bg-sand/20">
-                        <td className="px-2 py-1.5 whitespace-nowrap text-ink-muted">
-                          {formatDateShort(tx.stripeCreatedAt)}
-                        </td>
-                        {showAccountColumn && (
-                          <td className="px-2 py-1.5 text-dark">
-                            {connectionLabels[tx.stripeConnectionId] ?? "—"}
-                          </td>
-                        )}
-                        <td className="px-2 py-1.5">
-                          <div className="capitalize text-dark">{tx.type}</div>
-                          <div
-                            className="max-w-[14rem] truncate text-ink-faint"
-                            title={tx.description ?? tx.stripeBalanceTransactionId}
+                  <tbody className="bg-surface-overlay">
+                    {transactions.map((tx) => {
+                      const hintFields = getStripeTextHintFields(tx);
+                      const hasHints = hintFields.length > 0;
+
+                      return (
+                        <Fragment key={tx.id}>
+                          <tr
+                            className={`group align-top hover:bg-sand/20 ${hasHints ? "" : "border-b border-sand-dark/30"}`}
                           >
-                            {tx.description ?? tx.stripeBalanceTransactionId}
-                          </div>
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <MemberCell tx={tx} />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <ProductCell tx={tx} />
-                        </td>
-                        <td className="px-2 py-1.5 text-right font-mono text-dark whitespace-nowrap">
-                          {formatMoneyMinor(tx.net, tx.currency)}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          {tx.pushedToQuickbooks ? (
-                            <span className="inline-flex rounded bg-jade/15 px-1.5 py-0.5 text-[10px] font-medium text-jade">
-                              Yes
-                            </span>
-                          ) : (
-                            <span className="inline-flex rounded bg-sand/80 px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
-                              No
-                            </span>
+                            <td className="px-2 py-1.5 whitespace-nowrap text-ink-muted">
+                              {formatDateShort(tx.stripeCreatedAt)}
+                            </td>
+                            {showAccountColumn && (
+                              <td className="px-2 py-1.5 text-dark">
+                                {connectionLabels[tx.stripeConnectionId] ?? "—"}
+                              </td>
+                            )}
+                            <td className="px-2 py-1.5">
+                              <div className="capitalize text-dark">{tx.type}</div>
+                              <div
+                                className="max-w-[12rem] truncate font-mono text-[10px] text-ink-faint"
+                                title={tx.stripeBalanceTransactionId}
+                              >
+                                {tx.stripeBalanceTransactionId}
+                              </div>
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <MemberCell tx={tx} />
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <ProductCell tx={tx} />
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-dark whitespace-nowrap">
+                              {formatMoneyMinor(tx.net, tx.currency)}
+                            </td>
+                            <td className="px-2 py-1.5">
+                              {tx.pushedToQuickbooks ? (
+                                <span className="inline-flex rounded bg-jade/15 px-1.5 py-0.5 text-[10px] font-medium text-jade">
+                                  Yes
+                                </span>
+                              ) : (
+                                <span className="inline-flex rounded bg-sand/80 px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
+                                  No
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-2 py-1.5 text-right">
+                              <Link
+                                to={transactionDetailHref(tx.id, returnTo)}
+                                className="inline-flex rounded border border-sand-dark/50 px-2 py-0.5 text-[11px] font-medium text-teal hover:bg-surface"
+                              >
+                                View
+                              </Link>
+                            </td>
+                          </tr>
+                          {hasHints && (
+                            <tr className="group border-b border-sand-dark/30 hover:bg-sand/20">
+                              <td className="px-2 pb-1.5 pt-0" />
+                              {showAccountColumn && (
+                                <td className="px-2 pb-1.5 pt-0" />
+                              )}
+                              <td
+                                colSpan={2}
+                                className="px-2 pb-2 pt-0 align-top"
+                              >
+                                <StripeTextHints fields={hintFields} />
+                              </td>
+                              <td className="px-2 pb-1.5 pt-0" />
+                              <td className="px-2 pb-1.5 pt-0" />
+                              <td className="px-2 pb-1.5 pt-0" />
+                              <td className="px-2 pb-1.5 pt-0" />
+                            </tr>
                           )}
-                        </td>
-                        <td className="px-2 py-1.5 text-right">
-                          <Link
-                            to={transactionDetailHref(tx.id, returnTo)}
-                            className="inline-flex rounded border border-sand-dark/50 px-2 py-0.5 text-[11px] font-medium text-teal hover:bg-surface"
-                          >
-                            View
-                          </Link>
-                        </td>
-                      </tr>
-                    ))}
+                        </Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

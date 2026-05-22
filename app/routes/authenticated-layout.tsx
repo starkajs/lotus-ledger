@@ -3,6 +3,7 @@ import { Outlet, useLoaderData } from "react-router";
 import type { Route } from "./+types/authenticated-layout";
 import { AppPageHeader } from "~/components/app-page-header";
 import { AppSidebar } from "~/components/app-sidebar";
+import { ScrollMainOnNavigate } from "~/components/scroll-main-on-navigate";
 import type { PageHeaderState } from "~/hooks/use-app-shell";
 import { requireUser } from "~/lib/session.server";
 
@@ -27,9 +28,9 @@ export default function AuthenticatedLayout() {
             maxWidth={pageHeader.maxWidth}
           />
         ) : null}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <ScrollMainOnNavigate>
           <Outlet context={{ user, setPageHeader }} />
-        </div>
+        </ScrollMainOnNavigate>
       </div>
     </div>
   );
