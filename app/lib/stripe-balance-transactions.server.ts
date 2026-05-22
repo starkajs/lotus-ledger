@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, isNull, or } from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   communityMembers,
@@ -286,13 +286,20 @@ function buildListWhere(options: ListStripeBalanceTransactionsOptions) {
     parts.push(eq(stripeBalanceTransactions.pushedToQuickbooks, false));
   }
 
-  if (
-    options.productMatch &&
-    options.productMatch !== "all"
-  ) {
-    parts.push(
-      eq(stripeBalanceTransactions.productMatchStatus, options.productMatch),
-    );
+  if (options.productMatch && options.productMatch !== "all") {
+    if (options.productMatch === "unmatched") {
+      // Include never-classified rows (null) and explicit unmatched status.
+      parts.push(
+        or(
+          eq(stripeBalanceTransactions.productMatchStatus, "unmatched"),
+          isNull(stripeBalanceTransactions.productMatchStatus),
+        ),
+      );
+    } else {
+      parts.push(
+        eq(stripeBalanceTransactions.productMatchStatus, options.productMatch),
+      );
+    }
   }
 
   if (parts.length === 0) return undefined;

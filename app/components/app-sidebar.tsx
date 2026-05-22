@@ -49,6 +49,12 @@ export function AppSidebar({ user }: { user: AuthUser }) {
           {user.name ?? user.email}
         </p>
         <NavLink
+          to="/account"
+          className="block rounded-jamyang px-3 py-2 text-xs font-medium text-ink-muted hover:bg-sand/50 hover:text-dark"
+        >
+          Account
+        </NavLink>
+        <NavLink
           to="/logout"
           className="block rounded-jamyang px-3 py-2 text-xs font-medium text-ink-muted hover:bg-sand/50 hover:text-dark"
         >

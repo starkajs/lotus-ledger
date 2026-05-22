@@ -5,8 +5,10 @@ export default [
   route("health", "routes/health.tsx"),
   route("login", "routes/login.tsx"),
   route("logout", "routes/logout.tsx"),
+  route("confirm-email-change", "routes/confirm-email-change.tsx"),
   layout("routes/authenticated-layout.tsx", [
     route("home", "routes/app.home.tsx"),
+    route("account", "routes/account.tsx"),
     route("community", "routes/community.tsx"),
     route("community/:memberId", "routes/community.$memberId.tsx"),
     route("products", "routes/products.tsx"),

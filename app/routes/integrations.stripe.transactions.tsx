@@ -56,7 +56,10 @@ function ProductCell({ tx }: { tx: StripeBalanceTransactionRecord }) {
       <span className="text-[10px] font-medium text-amber-700">Ambiguous</span>
     );
   }
-  if (tx.productMatchStatus === "unmatched") {
+  if (
+    tx.productMatchStatus === "unmatched" ||
+    (!tx.productMatchStatus && !tx.productId)
+  ) {
     return (
       <span className="text-[10px] font-medium text-maroon">Unmatched</span>
     );
@@ -219,6 +222,11 @@ export default function StripeTransactionsPage({
 
   const filters: TransactionFilters = { account, pushed, product };
   const hasFilters = pushed !== "all" || product !== "all";
+  const unmatchedOnly = product === "unmatched";
+
+  function filtersHref(overrides: Partial<TransactionFilters>) {
+    return pageHref(1, { ...filters, ...overrides });
+  }
   const returnTo = `${location.pathname}${location.search}`;
   const showAccountColumn = connections.length > 1;
 
@@ -418,6 +426,21 @@ export default function StripeTransactionsPage({
             >
               Apply
             </button>
+            {!unmatchedOnly ? (
+              <Link
+                to={filtersHref({ product: "unmatched" })}
+                className="rounded-jamyang-pill border border-maroon/40 bg-maroon/5 px-3 py-1.5 text-sm text-maroon hover:bg-maroon/10"
+              >
+                Unmatched only
+              </Link>
+            ) : (
+              <Link
+                to={filtersHref({ product: "all" })}
+                className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1.5 text-sm text-ink-muted hover:bg-surface"
+              >
+                Show all products
+              </Link>
+            )}
             {hasFilters && (
               <Link
                 to={account ? `?account=${account}` : "?"}
@@ -427,6 +450,13 @@ export default function StripeTransactionsPage({
               </Link>
             )}
           </form>
+
+          {unmatchedOnly && (
+            <p className="mt-2 text-xs text-ink-muted">
+              Showing transactions with no product assigned (including not yet
+              classified).
+            </p>
+          )}
 
           <p className="mt-3 text-xs text-ink-muted">
             {total === 0

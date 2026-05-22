@@ -1,7 +1,8 @@
-import { Form } from "react-router";
+import { Form, Link } from "react-router";
 import type { Route } from "./+types/users";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
+import { requestEmailChange } from "~/lib/email-change.server";
 import { inviteUser } from "~/lib/invite.server";
 import { isResendConfigured } from "~/lib/resend.server";
 import { requireUser } from "~/lib/session.server";
@@ -41,6 +42,35 @@ export async function action({ request }: Route.ActionArgs) {
       return {
         scope: "delete" as const,
         error: err instanceof Error ? err.message : "Failed to delete user",
+      };
+    }
+  }
+
+  if (intent === "changeEmail") {
+    const userId = String(form.get("userId") ?? "");
+    const newEmail = String(form.get("newEmail") ?? "").trim();
+    if (!userId || !newEmail) {
+      return {
+        scope: "changeEmail" as const,
+        error: "User and new email are required",
+      };
+    }
+    try {
+      const result = await requestEmailChange({
+        userId,
+        newEmail,
+        initiatedByUserId: currentUser.id,
+      });
+      return {
+        scope: "changeEmail" as const,
+        success: true as const,
+        newEmail: result.newEmail,
+        emailSent: result.emailSent,
+      };
+    } catch (err) {
+      return {
+        scope: "changeEmail" as const,
+        error: err instanceof Error ? err.message : "Failed to send email change",
       };
     }
   }
@@ -224,6 +254,20 @@ export default function UsersPage({
               {actionData.error}
             </p>
           )}
+          {actionData?.scope === "changeEmail" && actionData.success && (
+            <p
+              role="status"
+              className="mt-3 rounded-jamyang border border-jade/40 bg-jade/5 px-4 py-3 text-sm text-dark"
+            >
+              Confirmation email sent to {actionData.newEmail}. They must open
+              the link within 24 hours to complete the change.
+            </p>
+          )}
+          {actionData?.scope === "changeEmail" && actionData.error && (
+            <p role="alert" className="mt-3 text-sm text-maroon">
+              {actionData.error}
+            </p>
+          )}
 
           {users.length === 0 ? (
             <p className="mt-4 text-sm text-ink-muted">No users yet.</p>
@@ -259,30 +303,76 @@ export default function UsersPage({
                         </td>
                         <td className="px-4 py-3 text-right">
                           {isSelf ? (
-                            <span className="text-xs text-ink-faint">—</span>
+                            <Link
+                              to="/account"
+                              className="text-xs text-teal hover:underline"
+                            >
+                              Change email
+                            </Link>
                           ) : (
-                            <Form method="post" className="inline">
-                              <input type="hidden" name="intent" value="delete" />
-                              <input type="hidden" name="userId" value={user.id} />
-                              <SubmitButton
-                                intent="delete"
-                                matchField="userId"
-                                matchValue={user.id}
-                                variant="ghost"
-                                loadingLabel="Deleting…"
-                                onClick={(e) => {
-                                  if (
-                                    !confirm(
-                                      `Remove ${user.email}? They will no longer be able to sign in.`,
-                                    )
-                                  ) {
-                                    e.preventDefault();
-                                  }
-                                }}
-                              >
-                                Delete
-                              </SubmitButton>
-                            </Form>
+                            <div className="flex flex-col items-end gap-2">
+                              {resendConfigured ? (
+                                <Form
+                                  method="post"
+                                  className="flex flex-wrap items-center justify-end gap-1.5"
+                                >
+                                  <input
+                                    type="hidden"
+                                    name="intent"
+                                    value="changeEmail"
+                                  />
+                                  <input
+                                    type="hidden"
+                                    name="userId"
+                                    value={user.id}
+                                  />
+                                  <input
+                                    name="newEmail"
+                                    type="email"
+                                    required
+                                    placeholder="New email"
+                                    aria-label={`New email for ${user.email}`}
+                                    className="w-36 rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1 text-xs"
+                                  />
+                                  <SubmitButton
+                                    intent="changeEmail"
+                                    matchField="userId"
+                                    matchValue={user.id}
+                                    variant="outline"
+                                    className="!px-2.5 !py-1 text-xs"
+                                    loadingLabel="Sending…"
+                                  >
+                                    Send change email
+                                  </SubmitButton>
+                                </Form>
+                              ) : (
+                                <span className="text-xs text-ink-faint">
+                                  Configure Resend to change email
+                                </span>
+                              )}
+                              <Form method="post" className="inline">
+                                <input type="hidden" name="intent" value="delete" />
+                                <input type="hidden" name="userId" value={user.id} />
+                                <SubmitButton
+                                  intent="delete"
+                                  matchField="userId"
+                                  matchValue={user.id}
+                                  variant="ghost"
+                                  loadingLabel="Deleting…"
+                                  onClick={(e) => {
+                                    if (
+                                      !confirm(
+                                        `Remove ${user.email}? They will no longer be able to sign in.`,
+                                      )
+                                    ) {
+                                      e.preventDefault();
+                                    }
+                                  }}
+                                >
+                                  Delete
+                                </SubmitButton>
+                              </Form>
+                            </div>
                           )}
                         </td>
                       </tr>

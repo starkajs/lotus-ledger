@@ -21,6 +21,23 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Pending email address changes (confirmed via link sent to the new address). */
+export const emailChangeTokens = pgTable("email_change_tokens", {
+  id: uuid().primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  newEmail: text("new_email").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  /** Set when an admin initiated the change; null for self-service. */
+  initiatedByUserId: uuid("initiated_by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const sessions = pgTable("sessions", {
   id: uuid().primaryKey().defaultRandom(),
   userId: uuid("user_id")
