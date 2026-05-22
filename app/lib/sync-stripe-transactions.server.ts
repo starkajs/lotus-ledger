@@ -15,8 +15,10 @@ import {
 
 export type SyncStripeTransactionsOptions = {
   connectionId?: string;
-  /** Only import balance transactions created within the last N days. */
+  /** Only import balance transactions created within the last N days. Ignored when `since` is set. */
   days?: number;
+  /** Only import balance transactions created on or after this instant (UTC calendar date if YYYY-MM-DD). */
+  since?: Date;
 };
 
 export type SyncStripeTransactionsResult = {
@@ -28,6 +30,7 @@ export type SyncStripeTransactionsResult = {
   classified: number;
   classificationSkippedManual: number;
   daysLimit?: number;
+  since?: string;
   stoppedAtCutoff: boolean;
 };
 
@@ -40,13 +43,40 @@ function createdSinceFromDays(days?: number): Date | undefined {
   return since;
 }
 
+/** Start of UTC calendar day for `YYYY-MM-DD`. */
+export function parseSyncSinceDate(value: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) {
+    throw new Error(`Invalid --since date "${value}" (use YYYY-MM-DD)`);
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    throw new Error(`Invalid --since date "${value}"`);
+  }
+  return date;
+}
+
+function resolveCreatedGte(
+  options: Pick<SyncStripeTransactionsOptions, "days" | "since">,
+): Date | undefined {
+  if (options.since) return options.since;
+  return createdSinceFromDays(options.days);
+}
+
 async function* iterateBalanceTransactions(
   stripe: Stripe,
-  createdSince?: Date,
+  createdGte?: Date,
 ): AsyncGenerator<Stripe.BalanceTransaction> {
   let startingAfter: string | undefined;
-  const createdSinceUnix = createdSince
-    ? Math.floor(createdSince.getTime() / 1000)
+  const createdGteUnix = createdGte
+    ? Math.floor(createdGte.getTime() / 1000)
     : undefined;
 
   for (;;) {
@@ -54,18 +84,16 @@ async function* iterateBalanceTransactions(
       limit: 100,
       starting_after: startingAfter,
       expand: ["data.source"],
+      ...(createdGteUnix !== undefined
+        ? { created: { gte: createdGteUnix } }
+        : {}),
     });
 
-    let hitCutoff = false;
     for (const tx of page.data) {
-      if (createdSinceUnix !== undefined && tx.created < createdSinceUnix) {
-        hitCutoff = true;
-        break;
-      }
       yield tx;
     }
 
-    if (hitCutoff || !page.has_more || page.data.length === 0) break;
+    if (!page.has_more || page.data.length === 0) break;
     startingAfter = page.data[page.data.length - 1]?.id;
   }
 }
@@ -73,7 +101,7 @@ async function* iterateBalanceTransactions(
 export async function syncStripeBalanceTransactions(
   options: SyncStripeTransactionsOptions = {},
 ): Promise<SyncStripeTransactionsResult> {
-  const createdSince = createdSinceFromDays(options.days);
+  const createdGte = resolveCreatedGte(options);
   const totals: SyncStripeTransactionsResult = {
     connectionsProcessed: 0,
     created: 0,
@@ -82,7 +110,8 @@ export async function syncStripeBalanceTransactions(
     membersLinked: 0,
     classified: 0,
     classificationSkippedManual: 0,
-    daysLimit: createdSince ? options.days : undefined,
+    daysLimit: options.since ? undefined : createdGte ? options.days : undefined,
+    since: options.since?.toISOString(),
     stoppedAtCutoff: false,
   };
 
@@ -107,13 +136,14 @@ export async function syncStripeBalanceTransactions(
   for (const connectionId of connectionIds) {
     totals.connectionsProcessed += 1;
     const stripe = await getStripeClientForConnection(connectionId);
+    let connectionProcessed = 0;
 
-    let hitCutoff = false;
-
-    for await (const tx of iterateBalanceTransactions(stripe, createdSince)) {
-      if (createdSince && tx.created * 1000 < createdSince.getTime()) {
-        hitCutoff = true;
-        break;
+    for await (const tx of iterateBalanceTransactions(stripe, createdGte)) {
+      connectionProcessed += 1;
+      if (connectionProcessed % 100 === 0) {
+        console.log(
+          `  … ${connectionProcessed} Stripe txns processed (connection ${totals.connectionsProcessed}/${connectionIds.length})`,
+        );
       }
       if (!isPostedStripeBalanceTransaction(tx)) {
         totals.skippedNotPosted += 1;
@@ -157,10 +187,6 @@ export async function syncStripeBalanceTransactions(
       } else if (classified) {
         totals.classified += 1;
       }
-    }
-
-    if (hitCutoff) {
-      totals.stoppedAtCutoff = true;
     }
   }
 

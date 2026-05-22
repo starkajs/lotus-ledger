@@ -1,0 +1,43 @@
+---
+description: React Router — never import .server modules from client route/components
+globs: app/routes/**/*.tsx,app/components/**/*.tsx
+alwaysApply: false
+---
+
+# React Router: `.server` modules are server-only
+
+Files ending in `.server.ts` (or imports from `~/lib/*.server`) must **not** be imported by code that runs in the browser.
+
+## What React Router strips
+
+Only these route exports run on the server and may use `.server` imports:
+
+- `loader`, `action`, `middleware`, `headers`
+
+The **default component export**, `meta`, `ErrorBoundary`, and any **shared components** still ship to the client. Any import they pull in must be client-safe.
+
+## Common mistake (causes Vite "Server-only module referenced by client")
+
+```tsx
+// BAD — default export imports a helper from .server
+import { formatThing, listThings } from "~/lib/things.server";
+
+export async function loader() { return listThings(); }
+
+export default function Page({ loaderData }) {
+  return <span>{formatThing(loaderData.x)}</span>;
+}
+```
+
+## Fix
+
+1. Move pure formatters, types, and constants to a **non-`.server`** module (e.g. `~/lib/quickbooks-format.ts`, `~/lib/stripe-transaction-signals.ts`).
+2. Keep DB, OAuth, secrets, and API calls in `.server` and import them **only** from `loader` / `action`.
+3. For types from `.server`, use `import type { ... }` (type-only imports are erased and safe).
+4. Split sync/list server functions from UI helpers when adding new QuickBooks/Stripe routes.
+
+## Checklist for new routes
+
+- [ ] Default export imports: no `*.server` (except `import type`)
+- [ ] Components under `app/components/`: no `*.server` imports
+- [ ] Forms/helpers used in `AppPage` header or body: client-safe modules only

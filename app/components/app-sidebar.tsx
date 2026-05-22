@@ -8,7 +8,11 @@ const navItems: { to: string; label: string; end?: boolean }[] = [
   { to: "/users", label: "Users" },
   { to: "/integrations/stripe", label: "Stripe", end: true },
   { to: "/integrations/stripe/transactions", label: "Transactions" },
-  { to: "/integrations/quickbooks", label: "QuickBooks" },
+  { to: "/integrations/quickbooks", label: "QuickBooks", end: true },
+  { to: "/integrations/quickbooks/accounts", label: "QB accounts" },
+  { to: "/integrations/quickbooks/classes", label: "QB classes" },
+  { to: "/integrations/quickbooks/items", label: "QB products" },
+  { to: "/integrations/quickbooks/sales-receipts", label: "QB sales receipts" },
 ];
 
 function navClassName({ isActive }: { isActive: boolean }) {

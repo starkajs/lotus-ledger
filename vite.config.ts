@@ -9,4 +9,8 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
+  server: {
+    // ngrok / similar tunnels send a non-localhost Host header
+    allowedHosts: true,
+  },
 });

@@ -1,4 +1,4 @@
-import { Form, redirect, useSearchParams } from "react-router";
+import { Form, Link, redirect, useLocation, useSearchParams } from "react-router";
 import type { Route } from "./+types/integrations.quickbooks";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
@@ -108,6 +108,8 @@ export default function QuickBooksIntegration({
   loaderData,
 }: Route.ComponentProps) {
   const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const postAction = location.pathname + location.search;
   const {
     appConfigured,
     connected,
@@ -129,17 +131,6 @@ export default function QuickBooksIntegration({
       >
         Connect QuickBooks
       </a>
-    ) : appConfigured && connected ? (
-      <Form method="post">
-        <input type="hidden" name="intent" value="disconnect" />
-        <SubmitButton
-          intent="disconnect"
-          variant="outline"
-          loadingLabel="Disconnecting…"
-        >
-          Disconnect
-        </SubmitButton>
-      </Form>
     ) : null;
 
   return (
@@ -252,9 +243,20 @@ APP_URL=http://localhost:5174`}
                   : "border-maroon/30 bg-maroon/5"
               }`}
             >
-              <h2 className="font-medium text-dark">
-                {connection?.ok ? "Connected" : "Connection issue"}
-              </h2>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <h2 className="font-medium text-dark">
+                  {connection?.ok ? "Connected" : "Connection issue"}
+                </h2>
+                <Form method="post" action={postAction}>
+                  <SubmitButton
+                    intent="disconnect"
+                    variant="outline"
+                    loadingLabel="Disconnecting…"
+                  >
+                    Disconnect
+                  </SubmitButton>
+                </Form>
+              </div>
               {connection?.ok && (
                 <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
                   {connection.companyName && (
@@ -279,6 +281,51 @@ APP_URL=http://localhost:5174`}
                 <p className="mt-3 text-sm text-maroon">{connection.error}</p>
               )}
             </div>
+
+            {connection?.ok && (
+              <section className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-6">
+                <h2 className="text-xl">Master data</h2>
+                <p className="mt-2 text-sm text-ink-muted">
+                  Sync chart of accounts, classes, and products &amp; services from
+                  QuickBooks into Lotus Ledger. Refresh each list when mappings change
+                  in QuickBooks.
+                </p>
+                <ul className="mt-4 flex flex-wrap gap-3 text-sm">
+                  <li>
+                    <Link
+                      to="/integrations/quickbooks/accounts"
+                      className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 hover:bg-surface"
+                    >
+                      Chart of accounts
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      to="/integrations/quickbooks/classes"
+                      className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 hover:bg-surface"
+                    >
+                      Classes
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      to="/integrations/quickbooks/items"
+                      className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 hover:bg-surface"
+                    >
+                      Products &amp; services
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      to="/integrations/quickbooks/sales-receipts"
+                      className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 hover:bg-surface"
+                    >
+                      Sales receipts
+                    </Link>
+                  </li>
+                </ul>
+              </section>
+            )}
 
             {connection?.ok && (
               <section>

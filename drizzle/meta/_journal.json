@@ -92,6 +92,48 @@
       "when": 1780600000000,
       "tag": "0012_stripe_transaction_sku",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1780700000000,
+      "tag": "0013_quickbooks_master_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780800000000,
+      "tag": "0014_quickbooks_sales_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1780900000000,
+      "tag": "0015_quickbooks_sales_receipts_detail",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1781000000000,
+      "tag": "0016_quickbooks_sales_receipts_reconcile",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1781100000000,
+      "tag": "0017_quickbooks_sales_receipts_tombstone",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781200000000,
+      "tag": "0018_dedupe_quickbooks_sales_receipts",
+      "breakpoints": true
     }
   ]
 }

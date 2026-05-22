@@ -1,5 +1,6 @@
 import {
   boolean,
+  date,
   integer,
   jsonb,
   pgTable,
@@ -204,3 +205,120 @@ export const quickbooksConnections = pgTable("quickbooks_connections", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Chart of accounts synced from QuickBooks (per connected company / realm). */
+export const quickbooksAccounts = pgTable(
+  "quickbooks_accounts",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    realmId: text("realm_id").notNull(),
+    quickbooksId: text("quickbooks_id").notNull(),
+    name: text().notNull(),
+    accountNumber: text("account_number"),
+    accountType: text("account_type"),
+    accountSubType: text("account_sub_type"),
+    fullyQualifiedName: text("fully_qualified_name"),
+    active: boolean().notNull().default(true),
+    quickbooksRaw: jsonb("quickbooks_raw").$type<Record<string, unknown>>(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("qb_accounts_realm_qb_id_unique").on(table.realmId, table.quickbooksId),
+  ],
+);
+
+/** QuickBooks classes synced for reporting / mapping. */
+export const quickbooksClasses = pgTable(
+  "quickbooks_classes",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    realmId: text("realm_id").notNull(),
+    quickbooksId: text("quickbooks_id").notNull(),
+    name: text().notNull(),
+    fullyQualifiedName: text("fully_qualified_name"),
+    parentQuickbooksId: text("parent_quickbooks_id"),
+    active: boolean().notNull().default(true),
+    quickbooksRaw: jsonb("quickbooks_raw").$type<Record<string, unknown>>(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("qb_classes_realm_qb_id_unique").on(table.realmId, table.quickbooksId),
+  ],
+);
+
+/** QuickBooks Items (products & services) synced for Lotus product mapping. */
+export const quickbooksItems = pgTable(
+  "quickbooks_items",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    realmId: text("realm_id").notNull(),
+    quickbooksId: text("quickbooks_id").notNull(),
+    name: text().notNull(),
+    itemType: text("item_type").notNull(),
+    sku: text(),
+    description: text(),
+    unitPrice: text("unit_price"),
+    incomeAccountRef: text("income_account_ref"),
+    active: boolean().notNull().default(true),
+    quickbooksRaw: jsonb("quickbooks_raw").$type<Record<string, unknown>>(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("qb_items_realm_qb_id_unique").on(table.realmId, table.quickbooksId),
+  ],
+);
+
+/** QuickBooks Sales Receipt transactions synced for reconciliation / reporting. */
+export const quickbooksSalesReceipts = pgTable(
+  "quickbooks_sales_receipts",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    realmId: text("realm_id").notNull(),
+    quickbooksId: text("quickbooks_id").notNull(),
+    docNumber: text("doc_number"),
+    txnDate: date("txn_date"),
+    customerQuickbooksId: text("customer_quickbooks_id"),
+    customerName: text("customer_name"),
+    totalAmt: text("total_amt").notNull(),
+    trackingNum: text("tracking_num"),
+    currencyCode: text("currency_code"),
+    currencyName: text("currency_name"),
+    paymentMethod: text("payment_method"),
+    depositToAccountRef: text("deposit_to_account_ref"),
+    privateNote: text("private_note"),
+    customerMemo: text("customer_memo"),
+    billEmail: text("bill_email"),
+    shipAddrSummary: text("ship_addr_summary"),
+    classRefId: text("class_ref_id"),
+    classRefName: text("class_ref_name"),
+    departmentRefId: text("department_ref_id"),
+    departmentRefName: text("department_ref_name"),
+    totalTax: text("total_tax"),
+    syncToken: text("sync_token"),
+    qbCreatedAt: timestamp("qb_created_at", { withTimezone: true }),
+    qbUpdatedAt: timestamp("qb_updated_at", { withTimezone: true }),
+    lineCount: integer("line_count"),
+    lineSummary: text("line_summary"),
+    lineItems: jsonb("line_items"),
+    quickbooksRaw: jsonb("quickbooks_raw").$type<Record<string, unknown>>(),
+    /** active = in QB on last refresh; deleted_in_qb = missing from QB within sync window */
+    qbStatus: text("qb_status").notNull().default("active"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    deletedInQbAt: timestamp("deleted_in_qb_at", { withTimezone: true }),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("qb_sales_receipts_realm_qb_id_unique").on(
+      table.realmId,
+      table.quickbooksId,
+    ),
+  ],
+);

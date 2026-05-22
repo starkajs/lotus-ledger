@@ -25,6 +25,26 @@ export default [
       "routes/integrations.stripe.transactions.$transactionId.tsx",
     ),
     route("integrations/quickbooks", "routes/integrations.quickbooks.tsx"),
+    route(
+      "integrations/quickbooks/accounts",
+      "routes/integrations.quickbooks.accounts.tsx",
+    ),
+    route(
+      "integrations/quickbooks/classes",
+      "routes/integrations.quickbooks.classes.tsx",
+    ),
+    route(
+      "integrations/quickbooks/items",
+      "routes/integrations.quickbooks.items.tsx",
+    ),
+    route(
+      "integrations/quickbooks/sales-receipts",
+      "routes/integrations.quickbooks.sales-receipts.tsx",
+    ),
+    route(
+      "integrations/quickbooks/sales-receipts/:receiptId",
+      "routes/integrations.quickbooks.sales-receipts.$receiptId.tsx",
+    ),
   ]),
   route("integrations/quickbooks/connect", "routes/integrations.quickbooks.connect.tsx"),
   route("integrations/quickbooks/callback", "routes/integrations.quickbooks.callback.tsx"),
