@@ -2,6 +2,7 @@ import type Stripe from "stripe";
 import { and, asc, count, eq, gte, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "~/db";
 import { communityMemberStripeLinks, communityMembers } from "~/db/schema";
+import { normalizeCountryCode } from "~/lib/country-code";
 import { countryCodesMatchingSearch } from "~/lib/country-code.server";
 import { stripeCustomerToMemberInput } from "~/lib/stripe-customer.server";
 
@@ -440,6 +441,125 @@ export type EnsureCommunityMemberResult = {
   memberName: string | null;
   stripeCustomerId: string;
 };
+
+export type EnsureCommunityMemberByEmailResult = {
+  communityMemberId: string | null;
+  memberEmail: string | null;
+  memberName: string | null;
+};
+
+export type UpsertCommunityMemberByEmailInput = {
+  email: string;
+  name?: string | null;
+  address?: CommunityMemberAddress | null;
+  joinedAt?: Date;
+};
+
+function buildMemberUpdateByEmail(
+  member: typeof communityMembers.$inferSelect,
+  input: UpsertCommunityMemberByEmailInput,
+  now: Date,
+) {
+  const name = input.name?.trim() || null;
+  const address = memberAddressFromRow(member);
+  const addressPatch = mergeAddress(address, input.address ?? null);
+  const joinedAt = pickEarlierJoinedAt(member.joinedAt, input.joinedAt);
+
+  const patch: Partial<typeof communityMembers.$inferInsert> = { updatedAt: now };
+  let hasChanges = false;
+
+  if (name && name !== member.name) {
+    patch.name = name;
+    hasChanges = true;
+  }
+  if (
+    joinedAt &&
+    joinedAt.getTime() !== (member.joinedAt?.getTime() ?? Number.NaN)
+  ) {
+    patch.joinedAt = joinedAt;
+    hasChanges = true;
+  }
+  if (Object.keys(addressPatch).length > 0) {
+    Object.assign(patch, addressPatch);
+    hasChanges = true;
+  }
+
+  return hasChanges ? patch : null;
+}
+
+/** Find or create a community member by email (e.g. WooCommerce billing email). */
+export async function ensureCommunityMemberForEmail(
+  input: UpsertCommunityMemberByEmailInput,
+): Promise<EnsureCommunityMemberByEmailResult> {
+  const email = input.email.trim().toLowerCase();
+  if (!email) {
+    return { communityMemberId: null, memberEmail: null, memberName: null };
+  }
+
+  const db = getDb();
+  const now = new Date();
+  const [existing] = await db
+    .select()
+    .from(communityMembers)
+    .where(eq(communityMembers.email, email))
+    .limit(1);
+
+  if (existing) {
+    const patch = buildMemberUpdateByEmail(existing, input, now);
+    if (patch) {
+      await db
+        .update(communityMembers)
+        .set(patch)
+        .where(eq(communityMembers.id, existing.id));
+    }
+    return {
+      communityMemberId: existing.id,
+      memberEmail: existing.email,
+      memberName: patch?.name ?? existing.name,
+    };
+  }
+
+  const name = input.name?.trim() || null;
+  const address = input.address ?? null;
+  const [inserted] = await db
+    .insert(communityMembers)
+    .values({
+      email,
+      name,
+      joinedAt: input.joinedAt ?? null,
+      countryCode: address?.countryCode ?? null,
+      addressLine1: address?.addressLine1 ?? null,
+      addressLine2: address?.addressLine2 ?? null,
+      city: address?.city ?? null,
+      state: address?.state ?? null,
+      postalCode: address?.postalCode ?? null,
+    })
+    .returning();
+
+  return {
+    communityMemberId: inserted.id,
+    memberEmail: inserted.email,
+    memberName: inserted.name,
+  };
+}
+
+export function billingAddressFromWooCommerce(billing: {
+  address_1?: string;
+  address_2?: string;
+  city?: string;
+  state?: string;
+  postcode?: string;
+  country?: string;
+}): CommunityMemberAddress {
+  return {
+    countryCode: normalizeCountryCode(billing.country),
+    addressLine1: billing.address_1?.trim() || null,
+    addressLine2: billing.address_2?.trim() || null,
+    city: billing.city?.trim() || null,
+    state: billing.state?.trim() || null,
+    postalCode: billing.postcode?.trim() || null,
+  };
+}
 
 /** Find or create a community member for a Stripe customer id. */
 export async function ensureCommunityMemberForStripeCustomer(

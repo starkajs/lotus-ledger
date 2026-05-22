@@ -13,6 +13,8 @@ const navItems: { to: string; label: string; end?: boolean }[] = [
   { to: "/integrations/quickbooks/classes", label: "QB classes" },
   { to: "/integrations/quickbooks/items", label: "QB products" },
   { to: "/integrations/quickbooks/sales-receipts", label: "QB sales receipts" },
+  { to: "/integrations/woocommerce", label: "WooCommerce", end: true },
+  { to: "/integrations/woocommerce/orders", label: "WC orders" },
 ];
 
 function navClassName({ isActive }: { isActive: boolean }) {

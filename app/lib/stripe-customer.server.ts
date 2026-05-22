@@ -1,6 +1,12 @@
 import type Stripe from "stripe";
 import { normalizeCountryCode } from "~/lib/country-code";
 import type { CommunityMemberAddress } from "~/lib/community-members.server";
+import {
+  extractStripeGuestBillingFromStripeRaw,
+  type StripeGuestBillingInfo,
+} from "~/lib/stripe-transaction-signals";
+
+export type { StripeGuestBillingInfo } from "~/lib/stripe-transaction-signals";
 
 export function parseStripeCustomerAddress(
   address: Stripe.Customer["address"],
@@ -57,4 +63,14 @@ export function extractStripeCustomerIdFromBalanceTransaction(
   return typeof withCustomer.customer === "string"
     ? withCustomer.customer
     : (withCustomer.customer.id ?? null);
+}
+
+/**
+ * Billing / Donorbox email when there is no Stripe Customer (`cus_…`).
+ */
+export function extractStripeGuestBillingFromBalanceTransaction(
+  tx: Stripe.BalanceTransaction,
+): StripeGuestBillingInfo | null {
+  const raw = JSON.parse(JSON.stringify(tx)) as Record<string, unknown>;
+  return extractStripeGuestBillingFromStripeRaw(raw);
 }

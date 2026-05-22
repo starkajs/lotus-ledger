@@ -5,7 +5,11 @@ import {
   getStripeConnectionById,
   listStripeConnections,
 } from "./stripe-connections.server";
-import { extractStripeCustomerIdFromBalanceTransaction } from "./stripe-customer.server";
+import { ensureCommunityMemberForEmail } from "./community-members.server";
+import {
+  extractStripeCustomerIdFromBalanceTransaction,
+  extractStripeGuestBillingFromBalanceTransaction,
+} from "./stripe-customer.server";
 import { classifyStripeTransactionById } from "./product-classification.server";
 import {
   isPostedStripeBalanceTransaction,
@@ -166,9 +170,21 @@ export async function syncStripeBalanceTransactions(
           stripeCustomerId: customerId,
           communityMemberId: member.communityMemberId,
         };
-        if (member.communityMemberId) {
-          totals.membersLinked += 1;
+      } else {
+        const guestBilling = extractStripeGuestBillingFromBalanceTransaction(tx);
+        if (guestBilling) {
+          const member = await ensureCommunityMemberForEmail({
+            email: guestBilling.email,
+            name: guestBilling.name,
+            address: guestBilling.address,
+            joinedAt: new Date(tx.created * 1000),
+          });
+          memberLink.communityMemberId = member.communityMemberId;
         }
+      }
+
+      if (memberLink.communityMemberId) {
+        totals.membersLinked += 1;
       }
 
       const result = await upsertStripeBalanceTransaction(

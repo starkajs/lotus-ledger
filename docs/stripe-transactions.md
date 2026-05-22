@@ -27,16 +27,16 @@ Unique on `(stripe_connection_id, stripe_balance_transaction_id)`.
 
 Re-sync updates amounts/status/raw JSON but does **not** clear `pushed_to_quickbooks`.
 
-### Sync filter (posted only)
+### Sync filter
 
-Imports only balance transactions that are **posted**:
+Imports balance transactions when:
 
-- `status === "available"` (on the Stripe balance, not pending)
+- `status` is `available` or `pending` (pending = on the balance but not yet payout-available; recent EUR/USD charges often stay pending for a few days)
 - When `source` is expanded: underlying `charge` / `payment` must have succeeded
 
-Pending or failed activity is skipped (`skippedNotPosted` in sync output).
+Failed or other statuses are skipped (`skippedNotPosted` in sync output).
 
-When a transaction has a Stripe customer, sync finds or creates the matching community member (by email) and links the row.
+When a transaction has a Stripe customer (`cus_…`), sync links via the customer record. Guest checkouts without a customer id are linked by **billing email** on the charge (`billing_details.email`), or by **Donorbox** charge metadata when present: `donorbox_email`, `donorbox_first_name`, `donorbox_last_name`, `donorbox_city`, `donorbox_country` (name and address are merged into the community member when missing).
 
 ## Sync
 
@@ -77,6 +77,14 @@ npm run backfill:stripe-payment-intents
 ```
 
 Reads `stripe_raw` only (no Stripe API). New syncs populate the column automatically.
+
+### Backfill community links (guest / Donorbox)
+
+```bash
+npm run backfill:stripe-community-links
+```
+
+Links unlinked guest transactions from billing or Donorbox metadata; enriches existing members from Donorbox fields.
 
 ## UI
 

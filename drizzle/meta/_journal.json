@@ -141,6 +141,13 @@
       "when": 1781300000000,
       "tag": "0019_stripe_payment_intent_id",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781400000000,
+      "tag": "0020_woocommerce_orders",
+      "breakpoints": true
     }
   ]
 }

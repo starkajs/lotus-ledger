@@ -384,7 +384,7 @@ export default function StripeTransactionsPage({
             <li>{syncResult.connectionsProcessed} account(s) processed</li>
             <li>{syncResult.created} new transactions</li>
             <li>{syncResult.updated} updated</li>
-            <li>{syncResult.skippedNotPosted} skipped (not posted)</li>
+            <li>{syncResult.skippedNotPosted} skipped (failed / not a payment)</li>
             <li>{syncResult.membersLinked} linked to community</li>
             <li>{syncResult.classified} classified for product</li>
             {syncResult.classificationSkippedManual > 0 && (

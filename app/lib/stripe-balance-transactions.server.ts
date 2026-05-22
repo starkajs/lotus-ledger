@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import { and, asc, count, desc, eq, gt, isNull, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   communityMembers,
@@ -8,9 +8,11 @@ import {
   stripeConnections,
 } from "~/db/schema";
 import type { ProductMatchStatus } from "./product-classification.server";
+import { ensureCommunityMemberForEmail } from "./community-members.server";
 import {
   extractPaymentIntentIdFromStripeRaw,
   extractSkuFromStripeRaw,
+  extractStripeGuestBillingFromStripeRaw,
 } from "./stripe-transaction-signals";
 
 export const STRIPE_TRANSACTIONS_PAGE_SIZE = 50;
@@ -79,13 +81,13 @@ export function serializeStripeBalanceTransactionRaw(
 }
 
 /**
- * Posted to the Stripe balance (`status === available`) and, when the source is
- * expanded, the underlying charge/payment succeeded.
+ * Importable balance activity: succeeded charge/payment on the balance, including
+ * `pending` (funds not yet available for payout — common for recent cross-border).
  */
 export function isPostedStripeBalanceTransaction(
   tx: Stripe.BalanceTransaction,
 ): boolean {
-  if (tx.status !== "available") {
+  if (tx.status !== "available" && tx.status !== "pending") {
     return false;
   }
 
@@ -622,4 +624,139 @@ export async function backfillStripePaymentIntentIds(options?: {
   }
 
   return { scanned, updated };
+}
+
+/**
+ * Link guest/Donorbox transactions to community members from `stripe_raw`
+ * (billing_details.email or metadata.donorbox_*). No Stripe API calls.
+ */
+export async function backfillStripeTransactionCommunityLinks(options?: {
+  batchSize?: number;
+}): Promise<{
+  scanned: number;
+  linked: number;
+  enriched: number;
+  skippedNoEmail: number;
+}> {
+  const db = getDb();
+  const batchSize = options?.batchSize ?? 200;
+  let scanned = 0;
+  let linked = 0;
+  let enriched = 0;
+  let skippedNoEmail = 0;
+  let cursor: string | undefined;
+
+  for (;;) {
+    const where = cursor
+      ? and(
+          isNull(stripeBalanceTransactions.communityMemberId),
+          isNull(stripeBalanceTransactions.stripeCustomerId),
+          isNotNull(stripeBalanceTransactions.stripeRaw),
+          gt(stripeBalanceTransactions.id, cursor),
+        )
+      : and(
+          isNull(stripeBalanceTransactions.communityMemberId),
+          isNull(stripeBalanceTransactions.stripeCustomerId),
+          isNotNull(stripeBalanceTransactions.stripeRaw),
+        );
+
+    const rows = await db
+      .select({
+        id: stripeBalanceTransactions.id,
+        stripeRaw: stripeBalanceTransactions.stripeRaw,
+        stripeCreatedAt: stripeBalanceTransactions.stripeCreatedAt,
+      })
+      .from(stripeBalanceTransactions)
+      .where(where)
+      .orderBy(asc(stripeBalanceTransactions.id))
+      .limit(batchSize);
+
+    if (rows.length === 0) break;
+
+    const now = new Date();
+    for (const row of rows) {
+      scanned += 1;
+      const billing = extractStripeGuestBillingFromStripeRaw(row.stripeRaw);
+      if (!billing) {
+        skippedNoEmail += 1;
+        continue;
+      }
+
+      const member = await ensureCommunityMemberForEmail({
+        email: billing.email,
+        name: billing.name,
+        address: billing.address,
+        joinedAt: row.stripeCreatedAt,
+      });
+
+      if (!member.communityMemberId) {
+        skippedNoEmail += 1;
+        continue;
+      }
+
+      await db
+        .update(stripeBalanceTransactions)
+        .set({
+          communityMemberId: member.communityMemberId,
+          updatedAt: now,
+        })
+        .where(eq(stripeBalanceTransactions.id, row.id));
+
+      linked += 1;
+    }
+
+    cursor = rows[rows.length - 1]!.id;
+    if (rows.length < batchSize) break;
+  }
+
+  // Enrich existing members from Donorbox metadata on already-linked guest txns.
+  let enrichCursor: string | undefined;
+  const donorboxInRaw = sql`stripe_raw::text like '%donorbox_email%'`;
+  for (;;) {
+    const enrichWhere = enrichCursor
+      ? and(
+          isNotNull(stripeBalanceTransactions.communityMemberId),
+          isNull(stripeBalanceTransactions.stripeCustomerId),
+          isNotNull(stripeBalanceTransactions.stripeRaw),
+          donorboxInRaw,
+          gt(stripeBalanceTransactions.id, enrichCursor),
+        )
+      : and(
+          isNotNull(stripeBalanceTransactions.communityMemberId),
+          isNull(stripeBalanceTransactions.stripeCustomerId),
+          isNotNull(stripeBalanceTransactions.stripeRaw),
+          donorboxInRaw,
+        );
+
+    const enrichRows = await db
+      .select({
+        id: stripeBalanceTransactions.id,
+        stripeRaw: stripeBalanceTransactions.stripeRaw,
+        stripeCreatedAt: stripeBalanceTransactions.stripeCreatedAt,
+      })
+      .from(stripeBalanceTransactions)
+      .where(enrichWhere)
+      .orderBy(asc(stripeBalanceTransactions.id))
+      .limit(batchSize);
+
+    if (enrichRows.length === 0) break;
+
+    for (const row of enrichRows) {
+      const billing = extractStripeGuestBillingFromStripeRaw(row.stripeRaw);
+      if (!billing) continue;
+
+      await ensureCommunityMemberForEmail({
+        email: billing.email,
+        name: billing.name,
+        address: billing.address,
+        joinedAt: row.stripeCreatedAt,
+      });
+      enriched += 1;
+    }
+
+    enrichCursor = enrichRows[enrichRows.length - 1]!.id;
+    if (enrichRows.length < batchSize) break;
+  }
+
+  return { scanned, linked, enriched, skippedNoEmail };
 }

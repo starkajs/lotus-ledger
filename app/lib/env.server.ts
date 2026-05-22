@@ -88,6 +88,44 @@ export function isResendConfigured(): boolean {
   return Boolean(getResendApiKey() && getResendFromAddress());
 }
 
+export function getWooCommerceSiteUrl(): string | undefined {
+  const raw = process.env.WC_SITE?.trim();
+  if (!raw) return undefined;
+  return raw.replace(/\/$/, "");
+}
+
+export function getWooCommerceConsumerKey(): string | undefined {
+  return process.env.WC_CONSUMER_KEY?.trim() || undefined;
+}
+
+export function getWooCommerceConsumerSecret(): string | undefined {
+  return process.env.WC_CONSUMER_SECRET?.trim() || undefined;
+}
+
+export function isWooCommerceConfigured(): boolean {
+  return Boolean(
+    getWooCommerceSiteUrl() &&
+      getWooCommerceConsumerKey() &&
+      getWooCommerceConsumerSecret(),
+  );
+}
+
+export function requireWooCommerceConfig(): {
+  siteUrl: string;
+  consumerKey: string;
+  consumerSecret: string;
+} {
+  const siteUrl = getWooCommerceSiteUrl();
+  const consumerKey = getWooCommerceConsumerKey();
+  const consumerSecret = getWooCommerceConsumerSecret();
+  if (!siteUrl || !consumerKey || !consumerSecret) {
+    throw new Error(
+      "WooCommerce is not configured. Set WC_SITE, WC_CONSUMER_KEY, and WC_CONSUMER_SECRET in .env.",
+    );
+  }
+  return { siteUrl, consumerKey, consumerSecret };
+}
+
 export function getOAuthStateSecret(): string {
   const secret = process.env.SESSION_SECRET?.trim();
   if (secret) return secret;

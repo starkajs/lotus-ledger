@@ -324,3 +324,56 @@ export const quickbooksSalesReceipts = pgTable(
     ),
   ],
 );
+
+/** WooCommerce order synced from WC REST API (site configured via WC_* env). */
+export const woocommerceOrders = pgTable(
+  "woocommerce_orders",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    wcOrderId: integer("wc_order_id").notNull(),
+    orderNumber: text("order_number"),
+    status: text().notNull(),
+    currency: text().notNull(),
+    totalMinor: integer("total_minor").notNull(),
+    subtotalMinor: integer("subtotal_minor"),
+    totalTaxMinor: integer("total_tax_minor"),
+    shippingMinor: integer("shipping_minor"),
+    discountMinor: integer("discount_minor"),
+    dateCreated: timestamp("date_created", { withTimezone: true }).notNull(),
+    dateModified: timestamp("date_modified", { withTimezone: true }),
+    datePaid: timestamp("date_paid", { withTimezone: true }),
+    dateCompleted: timestamp("date_completed", { withTimezone: true }),
+    paymentMethod: text("payment_method"),
+    paymentMethodTitle: text("payment_method_title"),
+    transactionId: text("transaction_id"),
+    wcCustomerId: integer("wc_customer_id"),
+    billingEmail: text("billing_email"),
+    billingFirstName: text("billing_first_name"),
+    billingLastName: text("billing_last_name"),
+    billingCountry: text("billing_country"),
+    billingCity: text("billing_city"),
+    billingPostcode: text("billing_postcode"),
+    customerNote: text("customer_note"),
+    lineItems: jsonb("line_items").$type<WooCommerceOrderLineItem[]>(),
+    lineSummary: text("line_summary"),
+    wcRaw: jsonb("wc_raw").$type<Record<string, unknown>>(),
+    communityMemberId: uuid("community_member_id").references(
+      () => communityMembers.id,
+      { onDelete: "set null" },
+    ),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [unique("woocommerce_orders_wc_order_id_unique").on(table.wcOrderId)],
+);
+
+export type WooCommerceOrderLineItem = {
+  id: number;
+  name: string;
+  sku: string | null;
+  productId: number | null;
+  quantity: number;
+  subtotalMinor: number | null;
+  totalMinor: number | null;
+};

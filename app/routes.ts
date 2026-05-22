@@ -45,6 +45,15 @@ export default [
       "integrations/quickbooks/sales-receipts/:receiptId",
       "routes/integrations.quickbooks.sales-receipts.$receiptId.tsx",
     ),
+    route("integrations/woocommerce", "routes/integrations.woocommerce.tsx"),
+    route(
+      "integrations/woocommerce/orders",
+      "routes/integrations.woocommerce.orders.tsx",
+    ),
+    route(
+      "integrations/woocommerce/orders/:orderId",
+      "routes/integrations.woocommerce.orders.$orderId.tsx",
+    ),
   ]),
   route("integrations/quickbooks/connect", "routes/integrations.quickbooks.connect.tsx"),
   route("integrations/quickbooks/callback", "routes/integrations.quickbooks.callback.tsx"),
