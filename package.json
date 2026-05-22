@@ -11,6 +11,8 @@
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:seed": "node scripts/seed-user.mjs",
     "invite-user": "node scripts/invite-user.mjs",
+    "fly:secrets": "node scripts/fly-secrets-from-env.mjs",
+    "fly:secrets:set": "node scripts/fly-secrets-from-env.mjs --apply",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

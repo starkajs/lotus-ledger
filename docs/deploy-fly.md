@@ -90,20 +90,34 @@ fly deploy --app lotus-ledger
 
 Health check should show `"database": "connected"`.
 
-## Step 5 — App secrets (integrations)
+## Step 5 — App secrets (from `.env`)
 
-Set production secrets as you need them — for example:
+Preview what will be sent (values masked):
 
 ```powershell
-fly secrets set `
-  APP_URL=https://lotus-ledger.fly.dev `
-  SESSION_SECRET=your-long-random-string `
-  ENCRYPTION_KEY=your-32-char-or-longer-secret `
-  QUICKBOOKS_CLIENT_ID=... `
-  QUICKBOOKS_CLIENT_SECRET=... `
-  QUICKBOOKS_ENVIRONMENT=production `
-  --app lotus-ledger
+npm run fly:secrets
 ```
+
+Apply to Fly (reads `.env`, **excludes** `DATABASE_URL` and `SEED_*`; rewrites local `APP_URL` to `https://lotus-ledger.fly.dev`):
+
+```powershell
+npm run fly:secrets:set
+```
+
+Or use the PowerShell wrapper:
+
+```powershell
+.\scripts\fly-set-secrets.ps1 -Apply
+```
+
+Override production URL if needed:
+
+```powershell
+$env:FLY_APP_URL = "https://lotus-ledger.fly.dev"
+npm run fly:secrets:set
+```
+
+`DATABASE_URL` is set by `fly mpg attach` — do not import your local proxy URL.
 
 Seed the first user (set `SEED_USER_EMAIL` / `SEED_USER_PASSWORD` in `.env`, proxy `DATABASE_URL` if needed):
 
