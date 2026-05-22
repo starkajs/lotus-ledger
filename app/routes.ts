@@ -9,6 +9,8 @@ export default [
     route("home", "routes/app.home.tsx"),
     route("community", "routes/community.tsx"),
     route("community/:memberId", "routes/community.$memberId.tsx"),
+    route("products", "routes/products.tsx"),
+    route("products/rules", "routes/products.rules.tsx"),
     route("users", "routes/users.tsx"),
     route("integrations/invite", "routes/integrations.invite.tsx"),
     route("integrations/stripe", "routes/integrations.stripe.tsx"),

@@ -3,9 +3,11 @@ import { and, count, desc, eq } from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   communityMembers,
+  products,
   stripeBalanceTransactions,
   stripeConnections,
 } from "~/db/schema";
+import type { ProductMatchStatus } from "./product-classification.server";
 
 export const STRIPE_TRANSACTIONS_PAGE_SIZE = 50;
 
@@ -29,6 +31,13 @@ export type StripeBalanceTransactionRecord = {
   memberEmail: string | null;
   memberName: string | null;
   stripeRaw: Record<string, unknown> | null;
+  productId: string | null;
+  productCode: string | null;
+  productName: string | null;
+  productQuickbooksItemId: string | null;
+  productMatchRuleId: string | null;
+  productMatchStatus: ProductMatchStatus | null;
+  productMatchedAt: string | null;
   pushedToQuickbooks: boolean;
   quickbooksPushedAt: string | null;
   createdAt: string;
@@ -121,6 +130,11 @@ export function mapStripeBalanceTransaction(
 function rowToRecord(
   row: typeof stripeBalanceTransactions.$inferSelect,
   member?: { email: string | null; name: string | null } | null,
+  product?: {
+    code: string | null;
+    name: string | null;
+    quickbooksItemId: string | null;
+  } | null,
 ): StripeBalanceTransactionRecord {
   return {
     id: row.id,
@@ -142,6 +156,13 @@ function rowToRecord(
     memberEmail: member?.email ?? null,
     memberName: member?.name ?? null,
     stripeRaw: row.stripeRaw ?? null,
+    productId: row.productId,
+    productCode: product?.code ?? null,
+    productName: product?.name ?? null,
+    productQuickbooksItemId: product?.quickbooksItemId ?? null,
+    productMatchRuleId: row.productMatchRuleId,
+    productMatchStatus: (row.productMatchStatus as ProductMatchStatus | null) ?? null,
+    productMatchedAt: row.productMatchedAt?.toISOString() ?? null,
     pushedToQuickbooks: row.pushedToQuickbooks,
     quickbooksPushedAt: row.quickbooksPushedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -150,8 +171,8 @@ function rowToRecord(
 }
 
 export type UpsertStripeBalanceTransactionResult =
-  | { status: "created" }
-  | { status: "updated" };
+  | { status: "created"; id: string }
+  | { status: "updated"; id: string };
 
 export async function upsertStripeBalanceTransaction(
   input: UpsertStripeBalanceTransactionInput,
@@ -199,28 +220,31 @@ export async function upsertStripeBalanceTransaction(
       })
       .where(eq(stripeBalanceTransactions.id, existing.id));
 
-    return { status: "updated" };
+    return { status: "updated", id: existing.id };
   }
 
-  await db.insert(stripeBalanceTransactions).values({
-    stripeConnectionId: input.stripeConnectionId,
-    stripeBalanceTransactionId: input.stripeBalanceTransactionId,
-    amount: input.amount,
-    currency: input.currency,
-    net: input.net,
-    fee: input.fee,
-    type: input.type,
-    status: input.status,
-    description: input.description ?? null,
-    sourceId: input.sourceId ?? null,
-    reportingCategory: input.reportingCategory ?? null,
-    availableOn: input.availableOn ?? null,
-    stripeCreatedAt: input.stripeCreatedAt,
-    stripeRaw: input.stripeRaw,
-    ...memberFields,
-  });
+  const [inserted] = await db
+    .insert(stripeBalanceTransactions)
+    .values({
+      stripeConnectionId: input.stripeConnectionId,
+      stripeBalanceTransactionId: input.stripeBalanceTransactionId,
+      amount: input.amount,
+      currency: input.currency,
+      net: input.net,
+      fee: input.fee,
+      type: input.type,
+      status: input.status,
+      description: input.description ?? null,
+      sourceId: input.sourceId ?? null,
+      reportingCategory: input.reportingCategory ?? null,
+      availableOn: input.availableOn ?? null,
+      stripeCreatedAt: input.stripeCreatedAt,
+      stripeRaw: input.stripeRaw,
+      ...memberFields,
+    })
+    .returning({ id: stripeBalanceTransactions.id });
 
-  return { status: "created" };
+  return { status: "created", id: inserted!.id };
 }
 
 export async function deleteAllStripeBalanceTransactions(): Promise<number> {
@@ -234,6 +258,7 @@ export async function deleteAllStripeBalanceTransactions(): Promise<number> {
 export type ListStripeBalanceTransactionsOptions = {
   stripeConnectionId?: string;
   pushedToQuickbooks?: "all" | "yes" | "no";
+  productMatch?: "all" | ProductMatchStatus;
   page?: number;
   pageSize?: number;
 };
@@ -259,6 +284,15 @@ function buildListWhere(options: ListStripeBalanceTransactionsOptions) {
     parts.push(eq(stripeBalanceTransactions.pushedToQuickbooks, true));
   } else if (options.pushedToQuickbooks === "no") {
     parts.push(eq(stripeBalanceTransactions.pushedToQuickbooks, false));
+  }
+
+  if (
+    options.productMatch &&
+    options.productMatch !== "all"
+  ) {
+    parts.push(
+      eq(stripeBalanceTransactions.productMatchStatus, options.productMatch),
+    );
   }
 
   if (parts.length === 0) return undefined;
@@ -289,12 +323,16 @@ export async function listStripeBalanceTransactions(
       transaction: stripeBalanceTransactions,
       memberEmail: communityMembers.email,
       memberName: communityMembers.name,
+      productCode: products.code,
+      productName: products.name,
+      productQuickbooksItemId: products.quickbooksItemId,
     })
     .from(stripeBalanceTransactions)
     .leftJoin(
       communityMembers,
       eq(stripeBalanceTransactions.communityMemberId, communityMembers.id),
     )
+    .leftJoin(products, eq(stripeBalanceTransactions.productId, products.id))
     .where(where)
     .orderBy(desc(stripeBalanceTransactions.stripeCreatedAt))
     .limit(pageSize)
@@ -302,10 +340,15 @@ export async function listStripeBalanceTransactions(
 
   return {
     transactions: rows.map((row) =>
-      rowToRecord(row.transaction, {
-        email: row.memberEmail,
-        name: row.memberName,
-      }),
+      rowToRecord(
+        row.transaction,
+        { email: row.memberEmail, name: row.memberName },
+        {
+          code: row.productCode,
+          name: row.productName,
+          quickbooksItemId: row.productQuickbooksItemId,
+        },
+      ),
     ),
     total,
     page: safePage,
@@ -331,6 +374,9 @@ export async function getStripeBalanceTransactionById(
       livemode: stripeConnections.livemode,
       memberEmail: communityMembers.email,
       memberName: communityMembers.name,
+      productCode: products.code,
+      productName: products.name,
+      productQuickbooksItemId: products.quickbooksItemId,
     })
     .from(stripeBalanceTransactions)
     .innerJoin(
@@ -341,16 +387,22 @@ export async function getStripeBalanceTransactionById(
       communityMembers,
       eq(stripeBalanceTransactions.communityMemberId, communityMembers.id),
     )
+    .leftJoin(products, eq(stripeBalanceTransactions.productId, products.id))
     .where(eq(stripeBalanceTransactions.id, id))
     .limit(1);
 
   if (!row) return null;
 
   return {
-    ...rowToRecord(row.transaction, {
-      email: row.memberEmail,
-      name: row.memberName,
-    }),
+    ...rowToRecord(
+      row.transaction,
+      { email: row.memberEmail, name: row.memberName },
+      {
+        code: row.productCode,
+        name: row.productName,
+        quickbooksItemId: row.productQuickbooksItemId,
+      },
+    ),
     connectionLabel: row.connectionLabel,
     livemode: row.livemode,
   };
@@ -401,6 +453,9 @@ export async function listStripeBalanceTransactionsForMember(
       memberEmail: communityMembers.email,
       memberName: communityMembers.name,
       connectionLabel: stripeConnections.label,
+      productCode: products.code,
+      productName: products.name,
+      productQuickbooksItemId: products.quickbooksItemId,
     })
     .from(stripeBalanceTransactions)
     .innerJoin(
@@ -411,6 +466,7 @@ export async function listStripeBalanceTransactionsForMember(
       communityMembers,
       eq(stripeBalanceTransactions.communityMemberId, communityMembers.id),
     )
+    .leftJoin(products, eq(stripeBalanceTransactions.productId, products.id))
     .where(where)
     .orderBy(desc(stripeBalanceTransactions.stripeCreatedAt))
     .limit(pageSize)
@@ -418,10 +474,15 @@ export async function listStripeBalanceTransactionsForMember(
 
   return {
     transactions: rows.map((row) => ({
-      ...rowToRecord(row.transaction, {
-        email: row.memberEmail,
-        name: row.memberName,
-      }),
+      ...rowToRecord(
+        row.transaction,
+        { email: row.memberEmail, name: row.memberName },
+        {
+          code: row.productCode,
+          name: row.productName,
+          quickbooksItemId: row.productQuickbooksItemId,
+        },
+      ),
       connectionLabel: row.connectionLabel,
     })),
     total,

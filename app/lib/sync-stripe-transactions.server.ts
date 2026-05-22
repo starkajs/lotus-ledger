@@ -6,6 +6,7 @@ import {
   listStripeConnections,
 } from "./stripe-connections.server";
 import { extractStripeCustomerIdFromBalanceTransaction } from "./stripe-customer.server";
+import { classifyStripeTransactionById } from "./product-classification.server";
 import {
   isPostedStripeBalanceTransaction,
   mapStripeBalanceTransaction,
@@ -24,6 +25,8 @@ export type SyncStripeTransactionsResult = {
   updated: number;
   skippedNotPosted: number;
   membersLinked: number;
+  classified: number;
+  classificationSkippedManual: number;
   daysLimit?: number;
   stoppedAtCutoff: boolean;
 };
@@ -77,6 +80,8 @@ export async function syncStripeBalanceTransactions(
     updated: 0,
     skippedNotPosted: 0,
     membersLinked: 0,
+    classified: 0,
+    classificationSkippedManual: 0,
     daysLimit: createdSince ? options.days : undefined,
     stoppedAtCutoff: false,
   };
@@ -144,6 +149,13 @@ export async function syncStripeBalanceTransactions(
         totals.created += 1;
       } else {
         totals.updated += 1;
+      }
+
+      const classified = await classifyStripeTransactionById(result.id);
+      if (classified?.skippedManual) {
+        totals.classificationSkippedManual += 1;
+      } else if (classified) {
+        totals.classified += 1;
       }
     }
 

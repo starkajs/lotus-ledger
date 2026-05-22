@@ -1,8 +1,15 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router";
+import { Form, Link, redirect, useLocation } from "react-router";
 import type { Route } from "./+types/integrations.stripe.transactions.$transactionId";
 import { AppPage } from "~/components/app-page";
+import { SubmitButton } from "~/components/submit-button";
 import { formatMoneyMinor } from "~/lib/money";
+import {
+  canPushTransactionToQuickbooks,
+  classifyStripeTransactionById,
+  setStripeTransactionProductManual,
+} from "~/lib/product-classification.server";
+import { listProducts } from "~/lib/products.server";
 import { getStripeBalanceTransactionById } from "~/lib/stripe-balance-transactions.server";
 import { requireUser } from "~/lib/session.server";
 
@@ -45,6 +52,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     throw new Response("Transaction not found", { status: 404 });
   }
 
+  const products = await listProducts({ activeOnly: true });
+  const pushCheck = canPushTransactionToQuickbooks(tx);
+
   const url = new URL(request.url);
   const returnTo =
     url.searchParams.get("returnTo") ?? "/integrations/stripe/transactions";
@@ -55,15 +65,46 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   return {
     tx,
+    products,
+    pushCheck,
     returnTo,
     stripeDashboardUrl: `${stripeDashboardHost}/balance/all-activity`,
   };
 }
 
+export async function action({ request, params }: Route.ActionArgs) {
+  await requireUser(request);
+  const form = await request.formData();
+  const intent = String(form.get("intent") ?? "");
+  const returnTo = String(form.get("returnTo") ?? "/integrations/stripe/transactions");
+
+  const detailPath = `/integrations/stripe/transactions/${params.transactionId}`;
+  const redirectUrl = `${detailPath}?returnTo=${encodeURIComponent(returnTo)}`;
+
+  if (intent === "setProduct") {
+    const productId = String(form.get("productId") ?? "");
+    if (!productId) {
+      return { scope: "product" as const, error: "Select a product" };
+    }
+    await setStripeTransactionProductManual(params.transactionId, productId);
+    return redirect(redirectUrl);
+  }
+
+  if (intent === "reclassify") {
+    await classifyStripeTransactionById(params.transactionId, { force: true });
+    return redirect(redirectUrl);
+  }
+
+  return { scope: "unknown" as const, error: "Unknown action" };
+}
+
 export default function StripeTransactionDetailPage({
   loaderData,
+  actionData,
 }: Route.ComponentProps) {
-  const { tx, returnTo, stripeDashboardUrl } = loaderData;
+  const { tx, products, pushCheck, returnTo, stripeDashboardUrl } = loaderData;
+  const location = useLocation();
+  const postAction = location.pathname + location.search;
 
   return (
     <AppPage
@@ -79,6 +120,68 @@ export default function StripeTransactionDetailPage({
       }
     >
       <div className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay px-4 py-4 sm:px-6">
+        <h2 className="text-sm font-medium text-dark">Product</h2>
+        <p className="mt-1 text-xs text-ink-muted">
+          {tx.productName
+            ? `${tx.productCode} — ${tx.productName}`
+            : "Not assigned"}
+          {tx.productMatchStatus && (
+            <span className="ml-2 capitalize">({tx.productMatchStatus})</span>
+          )}
+        </p>
+        <Form
+          method="post"
+          action={postAction}
+          className="mt-3 flex flex-wrap items-end gap-2"
+        >
+          <input type="hidden" name="returnTo" value={returnTo} />
+          <label className="flex flex-col gap-0.5 text-xs">
+            <span className="text-ink-muted">Assign product</span>
+            <select
+              name="productId"
+              defaultValue={tx.productId ?? ""}
+              className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[12rem]"
+            >
+              <option value="">— Select —</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.code} — {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <SubmitButton
+            intent="setProduct"
+            variant="pill"
+            loadingLabel="Saving…"
+          >
+            Save (manual)
+          </SubmitButton>
+        </Form>
+        <Form method="post" action={postAction} className="mt-2">
+          <input type="hidden" name="returnTo" value={returnTo} />
+          <SubmitButton
+            intent="reclassify"
+            variant="pill"
+            loadingLabel="Re-classifying…"
+          >
+            Re-classify
+          </SubmitButton>
+        </Form>
+        {actionData?.scope === "product" && actionData.error && (
+          <p className="mt-2 text-sm text-maroon">{actionData.error}</p>
+        )}
+        <p className="mt-3 text-xs text-ink-muted">
+          QuickBooks push:{" "}
+          {pushCheck.ok ? (
+            <span className="text-jade">Ready</span>
+          ) : (
+            <span className="text-maroon">{pushCheck.reason}</span>
+          )}
+        </p>
+      </div>
+
+      <div className="mt-4 rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay px-4 py-4 sm:px-6">
         <dl>
           <DetailRow label="Stripe account">
             {tx.connectionLabel ?? "—"}
@@ -165,6 +268,9 @@ export default function StripeTransactionDetailPage({
             ) : (
               "Not pushed"
             )}
+          </DetailRow>
+          <DetailRow label="Product classified">
+            {formatDateTime(tx.productMatchedAt)}
           </DetailRow>
           <DetailRow label="Synced to Lotus">
             {formatDateTime(tx.createdAt)}

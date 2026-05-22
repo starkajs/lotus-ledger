@@ -38,7 +38,11 @@ export function SubmitButton({
   const pending = useFormSubmitting({ intent, matchField, matchValue });
 
   return (
-    <button
+    <>
+      {intent != null ? (
+        <input type="hidden" name="intent" value={intent} />
+      ) : null}
+      <button
       type="submit"
       disabled={disabled || pending}
       aria-busy={pending}
@@ -56,5 +60,6 @@ export function SubmitButton({
         children
       )}
     </button>
+    </>
   );
 }

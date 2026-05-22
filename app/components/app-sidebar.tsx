@@ -4,6 +4,7 @@ import type { AuthUser } from "~/lib/session.server";
 const navItems: { to: string; label: string; end?: boolean }[] = [
   { to: "/home", label: "Home", end: true },
   { to: "/community", label: "Community" },
+  { to: "/products", label: "Products" },
   { to: "/users", label: "Users" },
   { to: "/integrations/stripe", label: "Stripe", end: true },
   { to: "/integrations/stripe/transactions", label: "Transactions" },

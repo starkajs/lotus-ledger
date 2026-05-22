@@ -92,6 +92,34 @@ export const communityMemberStripeLinks = pgTable("community_member_stripe_links
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Lotus product catalog — maps to a single QuickBooks item per product. */
+export const products = pgTable("products", {
+  id: uuid().primaryKey().defaultRandom(),
+  code: text().notNull().unique(),
+  name: text().notNull(),
+  quickbooksItemId: text("quickbooks_item_id"),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Text/SKU rules that assign Stripe transactions to products (first match wins). */
+export const productMatchRules = pgTable("product_match_rules", {
+  id: uuid().primaryKey().defaultRandom(),
+  productId: uuid("product_id")
+    .notNull()
+    .references(() => products.id, { onDelete: "cascade" }),
+  priority: integer().notNull().default(100),
+  field: text().notNull(),
+  matchType: text("match_type").notNull(),
+  pattern: text().notNull(),
+  caseInsensitive: boolean("case_insensitive").notNull().default(true),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /**
  * Stripe Balance Transaction (txn_…), synced per saved Stripe connection.
  * Amounts are in minor units (cents) as returned by Stripe.
@@ -122,6 +150,15 @@ export const stripeBalanceTransactions = pgTable(
     ),
     /** Full Stripe Balance Transaction object as returned by the API. */
     stripeRaw: jsonb("stripe_raw").$type<Record<string, unknown>>(),
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    productMatchRuleId: uuid("product_match_rule_id").references(
+      () => productMatchRules.id,
+      { onDelete: "set null" },
+    ),
+    productMatchStatus: text("product_match_status"),
+    productMatchedAt: timestamp("product_matched_at", { withTimezone: true }),
     pushedToQuickbooks: boolean("pushed_to_quickbooks").notNull().default(false),
     quickbooksPushedAt: timestamp("quickbooks_pushed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -10,6 +10,8 @@ import {
 } from "~/lib/stripe-balance-transactions.server";
 import { requireUser } from "~/lib/session.server";
 import { listStripeConnections } from "~/lib/stripe-connections.server";
+import type { ProductMatchStatus } from "~/lib/product-classification.server";
+import { classifyAllStripeTransactions } from "~/lib/product-classification.server";
 import { syncStripeBalanceTransactions } from "~/lib/sync-stripe-transactions.server";
 
 function formatDateShort(iso: string) {
@@ -25,15 +27,41 @@ function formatDateShort(iso: string) {
 type TransactionFilters = {
   account: string;
   pushed: "all" | "yes" | "no";
+  product: "all" | ProductMatchStatus;
 };
 
 function pageHref(page: number, filters: TransactionFilters) {
   const params = new URLSearchParams();
   if (filters.account) params.set("account", filters.account);
   if (filters.pushed !== "all") params.set("pushed", filters.pushed);
+  if (filters.product !== "all") params.set("product", filters.product);
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `?${query}` : "?";
+}
+
+function ProductCell({ tx }: { tx: StripeBalanceTransactionRecord }) {
+  if (tx.productCode) {
+    return (
+      <span title={tx.productName ?? undefined}>
+        <span className="font-mono text-dark">{tx.productCode}</span>
+        {tx.productMatchStatus === "manual" && (
+          <span className="ml-1 text-[10px] text-ink-faint">manual</span>
+        )}
+      </span>
+    );
+  }
+  if (tx.productMatchStatus === "ambiguous") {
+    return (
+      <span className="text-[10px] font-medium text-amber-700">Ambiguous</span>
+    );
+  }
+  if (tx.productMatchStatus === "unmatched") {
+    return (
+      <span className="text-[10px] font-medium text-maroon">Unmatched</span>
+    );
+  }
+  return <span className="text-ink-faint">—</span>;
 }
 
 function communityMemberHref(tx: StripeBalanceTransactionRecord) {
@@ -94,11 +122,23 @@ export async function loader({ request }: Route.LoaderArgs) {
   const pushedRaw = url.searchParams.get("pushed");
   const pushed: TransactionFilters["pushed"] =
     pushedRaw === "yes" || pushedRaw === "no" ? pushedRaw : "all";
+  const productRaw = url.searchParams.get("product");
+  const productStatuses: ProductMatchStatus[] = [
+    "matched",
+    "unmatched",
+    "manual",
+    "ambiguous",
+  ];
+  const product: TransactionFilters["product"] =
+    productRaw && productStatuses.includes(productRaw as ProductMatchStatus)
+      ? (productRaw as ProductMatchStatus)
+      : "all";
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
 
   const txList = await listStripeBalanceTransactions({
     stripeConnectionId: account || undefined,
     pushedToQuickbooks: pushed,
+    productMatch: product,
     page,
     pageSize: STRIPE_TRANSACTIONS_PAGE_SIZE,
   });
@@ -111,6 +151,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     connections,
     account,
     pushed,
+    product,
     connectionLabels,
     ...txList,
   };
@@ -120,6 +161,23 @@ export async function action({ request }: Route.ActionArgs) {
   await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
+
+  if (intent === "classify") {
+    const connectionId = String(form.get("connectionId") ?? "").trim() || undefined;
+    const onlyUnmatched = form.get("onlyUnmatched") === "1";
+    try {
+      const result = await classifyAllStripeTransactions({
+        stripeConnectionId: connectionId,
+        onlyUnmatched,
+      });
+      return { scope: "classify" as const, success: true as const, result };
+    } catch (err) {
+      return {
+        scope: "classify" as const,
+        error: err instanceof Error ? err.message : "Classification failed",
+      };
+    }
+  }
 
   if (intent === "sync") {
     const connectionId = String(form.get("connectionId") ?? "").trim() || undefined;
@@ -149,6 +207,7 @@ export default function StripeTransactionsPage({
     connections,
     account,
     pushed,
+    product,
     connectionLabels,
     transactions,
     total,
@@ -158,8 +217,8 @@ export default function StripeTransactionsPage({
   } = loaderData;
   const location = useLocation();
 
-  const filters: TransactionFilters = { account, pushed };
-  const hasFilters = pushed !== "all";
+  const filters: TransactionFilters = { account, pushed, product };
+  const hasFilters = pushed !== "all" || product !== "all";
   const returnTo = `${location.pathname}${location.search}`;
   const showAccountColumn = connections.length > 1;
 
@@ -167,18 +226,28 @@ export default function StripeTransactionsPage({
     actionData?.scope === "sync" && actionData.success ? actionData.result : null;
   const syncError =
     actionData?.scope === "sync" && actionData.error ? actionData.error : null;
+  const classifyResult =
+    actionData?.scope === "classify" && actionData.success
+      ? actionData.result
+      : null;
+  const classifyError =
+    actionData?.scope === "classify" && actionData.error
+      ? actionData.error
+      : null;
 
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, total);
+
+  const postAction = location.pathname + location.search;
 
   return (
     <AppPage
       title="Stripe transactions"
       description="Balance transactions synced from each connected Stripe account."
-      actions={
-        connections.length > 0 ? (
-          <Form method="post" className="flex flex-wrap items-center gap-3">
-            <input type="hidden" name="intent" value="sync" />
+    >
+      {connections.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Form method="post" action={postAction} className="flex flex-wrap items-center gap-3">
             {account ? (
               <input type="hidden" name="connectionId" value={account} />
             ) : null}
@@ -199,9 +268,30 @@ export default function StripeTransactionsPage({
               Sync from Stripe
             </SubmitButton>
           </Form>
-        ) : undefined
-      }
-    >
+          <Form method="post" action={postAction} className="flex flex-wrap items-center gap-2">
+            {account ? (
+              <input type="hidden" name="connectionId" value={account} />
+            ) : null}
+            <label className="flex items-center gap-2 text-sm text-ink-muted">
+              <input
+                type="checkbox"
+                name="onlyUnmatched"
+                value="1"
+                className="rounded border-sand-dark/60"
+              />
+              Unmatched only
+            </label>
+            <SubmitButton
+              intent="classify"
+              variant="pill"
+              loadingLabel="Classifying…"
+            >
+              Re-classify
+            </SubmitButton>
+          </Form>
+        </div>
+      )}
+
       <p className="text-sm text-ink-muted">
         <Link to="/integrations/stripe" className="text-teal underline">
           Stripe settings
@@ -233,6 +323,12 @@ export default function StripeTransactionsPage({
             <li>{syncResult.updated} updated</li>
             <li>{syncResult.skippedNotPosted} skipped (not posted)</li>
             <li>{syncResult.membersLinked} linked to community</li>
+            <li>{syncResult.classified} classified for product</li>
+            {syncResult.classificationSkippedManual > 0 && (
+              <li>
+                {syncResult.classificationSkippedManual} skipped (manual product)
+              </li>
+            )}
             {syncResult.daysLimit != null && (
               <li>
                 Limited to last {syncResult.daysLimit} days
@@ -246,6 +342,30 @@ export default function StripeTransactionsPage({
       {syncError && (
         <p role="alert" className="mt-4 text-sm text-maroon">
           {syncError}
+        </p>
+      )}
+
+      {classifyResult && (
+        <div
+          role="status"
+          className="mt-4 rounded-jamyang border border-jade/40 bg-jade/5 p-4 text-sm"
+        >
+          <p className="font-medium text-dark">Classification complete</p>
+          <ul className="mt-2 list-inside list-disc text-ink-muted">
+            <li>{classifyResult.processed} processed</li>
+            <li>{classifyResult.matched} matched</li>
+            <li>{classifyResult.unmatched} unmatched</li>
+            <li>{classifyResult.ambiguous} ambiguous</li>
+            {classifyResult.skippedManual > 0 && (
+              <li>{classifyResult.skippedManual} skipped (manual)</li>
+            )}
+          </ul>
+        </div>
+      )}
+
+      {classifyError && (
+        <p role="alert" className="mt-4 text-sm text-maroon">
+          {classifyError}
         </p>
       )}
 
@@ -276,6 +396,20 @@ export default function StripeTransactionsPage({
                 <option value="all">All</option>
                 <option value="no">Not pushed</option>
                 <option value="yes">Pushed</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-0.5 text-xs">
+              <span className="text-ink-muted">Product</span>
+              <select
+                name="product"
+                defaultValue={product}
+                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
+              >
+                <option value="all">All</option>
+                <option value="matched">Matched</option>
+                <option value="unmatched">Unmatched</option>
+                <option value="ambiguous">Ambiguous</option>
+                <option value="manual">Manual</option>
               </select>
             </label>
             <button
@@ -322,6 +456,7 @@ export default function StripeTransactionsPage({
                       )}
                       <th className="px-2 py-1.5 font-medium">Transaction</th>
                       <th className="px-2 py-1.5 font-medium">Customer</th>
+                      <th className="px-2 py-1.5 font-medium">Product</th>
                       <th className="px-2 py-1.5 font-medium text-right">Net</th>
                       <th className="px-2 py-1.5 font-medium">QB</th>
                       <th className="px-2 py-1.5 font-medium">
@@ -351,6 +486,9 @@ export default function StripeTransactionsPage({
                         </td>
                         <td className="px-2 py-1.5">
                           <MemberCell tx={tx} />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <ProductCell tx={tx} />
                         </td>
                         <td className="px-2 py-1.5 text-right font-mono text-dark whitespace-nowrap">
                           {formatMoneyMinor(tx.net, tx.currency)}
