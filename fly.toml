@@ -6,9 +6,8 @@ primary_region = "lhr"
 
 [build]
 
-# After Postgres is attached and DATABASE_URL is set, uncomment:
-# [deploy]
-#   release_command = "node scripts/db-migrate.mjs"
+[deploy]
+  release_command = "node scripts/db-migrate.mjs"
 
 [env]
   NODE_ENV = "production"
