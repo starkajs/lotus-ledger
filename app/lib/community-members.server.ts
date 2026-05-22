@@ -210,6 +210,22 @@ export async function listCommunityMembers(
   };
 }
 
+export async function getCommunityMemberById(
+  id: string,
+): Promise<CommunityMember | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(communityMembers)
+    .where(eq(communityMembers.id, id))
+    .limit(1);
+
+  if (!row) return null;
+
+  const [member] = await attachStripeLinks([row]);
+  return member ?? null;
+}
+
 export type UpsertCommunityMemberFromStripeInput = {
   email: string;
   stripeCustomerId: string;

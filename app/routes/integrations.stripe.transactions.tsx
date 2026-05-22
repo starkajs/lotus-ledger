@@ -37,8 +37,13 @@ function pageHref(page: number, filters: TransactionFilters) {
 }
 
 function communityMemberHref(tx: StripeBalanceTransactionRecord) {
-  if (!tx.memberEmail) return null;
-  return `/community?q=${encodeURIComponent(tx.memberEmail)}`;
+  if (tx.communityMemberId) {
+    return `/community/${tx.communityMemberId}`;
+  }
+  if (tx.memberEmail) {
+    return `/community?q=${encodeURIComponent(tx.memberEmail)}`;
+  }
+  return null;
 }
 
 function MemberCell({ tx }: { tx: StripeBalanceTransactionRecord }) {

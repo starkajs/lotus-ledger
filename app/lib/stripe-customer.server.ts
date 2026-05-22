@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import { normalizeCountryCode } from "~/lib/country-code.server";
+import { normalizeCountryCode } from "~/lib/country-code";
 import type { CommunityMemberAddress } from "~/lib/community-members.server";
 
 export function parseStripeCustomerAddress(

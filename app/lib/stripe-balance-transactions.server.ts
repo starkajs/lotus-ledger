@@ -356,6 +356,81 @@ export async function getStripeBalanceTransactionById(
   };
 }
 
+export type StripeBalanceTransactionForMember = StripeBalanceTransactionRecord & {
+  connectionLabel: string | null;
+};
+
+export type ListStripeBalanceTransactionsForMemberResult = {
+  transactions: StripeBalanceTransactionForMember[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
+export type ListStripeBalanceTransactionsForMemberOptions = {
+  communityMemberId: string;
+  page?: number;
+  pageSize?: number;
+};
+
+export async function listStripeBalanceTransactionsForMember(
+  options: ListStripeBalanceTransactionsForMemberOptions,
+): Promise<ListStripeBalanceTransactionsForMemberResult> {
+  const pageSize = options.pageSize ?? STRIPE_TRANSACTIONS_PAGE_SIZE;
+  const page = Math.max(1, options.page ?? 1);
+  const where = eq(
+    stripeBalanceTransactions.communityMemberId,
+    options.communityMemberId,
+  );
+
+  const db = getDb();
+
+  const [{ value: total }] = await db
+    .select({ value: count() })
+    .from(stripeBalanceTransactions)
+    .where(where);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const offset = (safePage - 1) * pageSize;
+
+  const rows = await db
+    .select({
+      transaction: stripeBalanceTransactions,
+      memberEmail: communityMembers.email,
+      memberName: communityMembers.name,
+      connectionLabel: stripeConnections.label,
+    })
+    .from(stripeBalanceTransactions)
+    .innerJoin(
+      stripeConnections,
+      eq(stripeBalanceTransactions.stripeConnectionId, stripeConnections.id),
+    )
+    .leftJoin(
+      communityMembers,
+      eq(stripeBalanceTransactions.communityMemberId, communityMembers.id),
+    )
+    .where(where)
+    .orderBy(desc(stripeBalanceTransactions.stripeCreatedAt))
+    .limit(pageSize)
+    .offset(offset);
+
+  return {
+    transactions: rows.map((row) => ({
+      ...rowToRecord(row.transaction, {
+        email: row.memberEmail,
+        name: row.memberName,
+      }),
+      connectionLabel: row.connectionLabel,
+    })),
+    total,
+    page: safePage,
+    pageSize,
+    totalPages,
+  };
+}
+
 export async function countStripeBalanceTransactions(
   stripeConnectionId?: string,
 ): Promise<number> {

@@ -8,6 +8,7 @@ export default [
   layout("routes/authenticated-layout.tsx", [
     route("home", "routes/app.home.tsx"),
     route("community", "routes/community.tsx"),
+    route("community/:memberId", "routes/community.$memberId.tsx"),
     route("users", "routes/users.tsx"),
     route("integrations/invite", "routes/integrations.invite.tsx"),
     route("integrations/stripe", "routes/integrations.stripe.tsx"),

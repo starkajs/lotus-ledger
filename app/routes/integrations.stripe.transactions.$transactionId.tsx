@@ -84,7 +84,14 @@ export default function StripeTransactionDetailPage({
             {tx.connectionLabel ?? "—"}
           </DetailRow>
           <DetailRow label="Community member">
-            {tx.memberEmail ? (
+            {tx.communityMemberId ? (
+              <Link
+                to={`/community/${tx.communityMemberId}`}
+                className="text-teal hover:underline"
+              >
+                {tx.memberName ?? tx.memberEmail ?? "View member"}
+              </Link>
+            ) : tx.memberEmail ? (
               <Link
                 to={`/community?q=${encodeURIComponent(tx.memberEmail)}`}
                 className="text-teal hover:underline"

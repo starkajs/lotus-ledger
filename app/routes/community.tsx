@@ -1,4 +1,4 @@
-import { Form, Link, useSearchParams } from "react-router";
+import { Form, Link, useLocation, useSearchParams } from "react-router";
 import type { Route } from "./+types/community";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
@@ -23,6 +23,11 @@ type CommunityFilters = {
   country: string;
   joinedDays?: number;
 };
+
+function memberHref(memberId: string, returnTo: string) {
+  const params = new URLSearchParams({ returnTo });
+  return `/community/${memberId}?${params}`;
+}
 
 function pageHref(page: number, filters: CommunityFilters) {
   const params = new URLSearchParams();
@@ -117,9 +122,11 @@ export default function CommunityPage({
     connectionCount,
   } = loaderData;
 
+  const location = useLocation();
   const filters: CommunityFilters = { q, country, joinedDays };
   const hasFilters = Boolean(q || country || joinedDays);
   const [searchParams] = useSearchParams();
+  const listReturnTo = `${location.pathname}${location.search}`;
 
   const syncResult =
     actionData?.scope === "sync" && actionData.success ? actionData.result : null;
@@ -266,6 +273,9 @@ export default function CommunityPage({
               <thead className="bg-surface text-dark">
                 <tr>
                   <th className="px-4 py-3 font-medium">Member</th>
+                  <th className="px-4 py-3 font-medium w-0">
+                    <span className="sr-only">View</span>
+                  </th>
                   <th className="px-4 py-3 font-medium">City</th>
                   <th className="px-4 py-3 font-medium">Country</th>
                   <th className="px-4 py-3 font-medium">Joined</th>
@@ -276,10 +286,25 @@ export default function CommunityPage({
                 {members.map((member) => (
                   <tr key={member.id}>
                     <td className="px-4 py-3">
-                      <div className="font-medium text-dark">
-                        {member.name ?? "—"}
-                      </div>
-                      <div className="mt-0.5 text-ink-muted">{member.email}</div>
+                      <Link
+                        to={memberHref(member.id, listReturnTo)}
+                        className="group block hover:text-teal"
+                      >
+                        <div className="font-medium text-dark group-hover:text-teal">
+                          {member.name ?? "—"}
+                        </div>
+                        <div className="mt-0.5 text-ink-muted group-hover:text-teal/80">
+                          {member.email}
+                        </div>
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Link
+                        to={memberHref(member.id, listReturnTo)}
+                        className="inline-flex rounded border border-sand-dark/50 px-2 py-1 text-xs font-medium text-teal hover:bg-surface"
+                      >
+                        View
+                      </Link>
                     </td>
                     <td className="px-4 py-3 text-ink-muted">
                       {member.city ?? "—"}
