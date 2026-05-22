@@ -1,4 +1,6 @@
 import type Stripe from "stripe";
+import { minorUnitsToMajor } from "~/lib/money";
+import { mapStripeBalanceTransaction } from "./stripe-balance-transactions.server";
 import { getStripeClientForConnection } from "./stripe-connections.server";
 
 export type StripeTransactionSummary = {
@@ -12,6 +14,7 @@ export type StripeTransactionSummary = {
   created: string;
   status: string;
   sourceId: string | null;
+  reportingCategory: string | null;
 };
 
 export type StripeTransactionsResult = {
@@ -20,31 +23,21 @@ export type StripeTransactionsResult = {
   livemode: boolean;
 };
 
-const ZERO_DECIMAL = new Set([
-  "bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf",
-  "ugx", "vnd", "vuv", "xaf", "xof", "xpf",
-]);
-
-function formatAmount(cents: number, currency: string): number {
-  if (ZERO_DECIMAL.has(currency.toLowerCase())) {
-    return cents;
-  }
-  return cents / 100;
-}
-
 function mapBalanceTransaction(tx: Stripe.BalanceTransaction): StripeTransactionSummary {
-  const currency = tx.currency.toLowerCase();
+  const mapped = mapStripeBalanceTransaction("", tx);
+  const currency = mapped.currency;
   return {
-    id: tx.id,
-    amount: formatAmount(tx.amount, currency),
+    id: mapped.stripeBalanceTransactionId,
+    amount: minorUnitsToMajor(mapped.amount, currency),
     currency,
-    net: formatAmount(tx.net, currency),
-    fee: formatAmount(tx.fee, currency),
-    type: tx.type,
-    description: tx.description,
-    created: new Date(tx.created * 1000).toISOString(),
-    status: tx.status,
-    sourceId: typeof tx.source === "string" ? tx.source : tx.source?.id ?? null,
+    net: minorUnitsToMajor(mapped.net, currency),
+    fee: minorUnitsToMajor(mapped.fee, currency),
+    type: mapped.type,
+    description: mapped.description ?? null,
+    created: mapped.stripeCreatedAt.toISOString(),
+    status: mapped.status,
+    sourceId: mapped.sourceId ?? null,
+    reportingCategory: mapped.reportingCategory ?? null,
   };
 }
 

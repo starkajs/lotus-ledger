@@ -4,36 +4,11 @@ import {
   getStripeConnectionById,
   listStripeConnections,
 } from "./stripe-connections.server";
-import { normalizeCountryCode } from "~/lib/country-code.server";
+import { stripeCustomerToMemberInput } from "~/lib/stripe-customer.server";
 import {
   upsertCommunityMemberFromStripe,
-  type CommunityMemberAddress,
   type UpsertCommunityMemberFromStripeResult,
 } from "./community-members.server";
-
-function parseStripeAddress(
-  address: Stripe.Customer["address"],
-): CommunityMemberAddress | null {
-  if (!address) return null;
-
-  const countryCode = normalizeCountryCode(address.country);
-  const addressLine1 = address.line1?.trim() || null;
-  const addressLine2 = address.line2?.trim() || null;
-  const city = address.city?.trim() || null;
-  const state = address.state?.trim() || null;
-  const postalCode = address.postal_code?.trim() || null;
-
-  if (!countryCode && !addressLine1 && !city) return null;
-
-  return {
-    countryCode,
-    addressLine1,
-    addressLine2,
-    city,
-    state,
-    postalCode,
-  };
-}
 
 export type SyncCommunityFromStripeOptions = {
   /** Sync one Stripe connection only (DB uuid). Omit to sync all saved connections. */
@@ -146,14 +121,9 @@ export async function syncCommunityMembersFromStripe(
         continue;
       }
 
-      const result = await upsertCommunityMemberFromStripe({
-        email,
-        stripeCustomerId: customer.id,
-        name: customer.name ?? customer.metadata?.name ?? null,
-        stripeConnectionId: connection.id,
-        address: parseStripeAddress(customer.address),
-        stripeCustomerCreatedAt: new Date(customer.created * 1000),
-      });
+      const result = await upsertCommunityMemberFromStripe(
+        stripeCustomerToMemberInput(connection.id, customer),
+      );
 
       applyUpsertResult(result, totals, customer, seenNewMembers);
     }

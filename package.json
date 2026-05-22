@@ -14,6 +14,8 @@
     "fly:secrets": "node scripts/fly-secrets-from-env.mjs",
     "fly:secrets:set": "node scripts/fly-secrets-from-env.mjs --apply",
     "sync:community": "npx tsx scripts/sync-community-from-stripe.ts",
+    "sync:stripe-transactions": "npx tsx scripts/sync-stripe-transactions.ts",
+    "clear:stripe-transactions": "npx tsx scripts/clear-stripe-transactions.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

@@ -11,6 +11,14 @@ export default [
     route("users", "routes/users.tsx"),
     route("integrations/invite", "routes/integrations.invite.tsx"),
     route("integrations/stripe", "routes/integrations.stripe.tsx"),
+    route(
+      "integrations/stripe/transactions",
+      "routes/integrations.stripe.transactions.tsx",
+    ),
+    route(
+      "integrations/stripe/transactions/:transactionId",
+      "routes/integrations.stripe.transactions.$transactionId.tsx",
+    ),
     route("integrations/quickbooks", "routes/integrations.quickbooks.tsx"),
   ]),
   route("integrations/quickbooks/connect", "routes/integrations.quickbooks.connect.tsx"),

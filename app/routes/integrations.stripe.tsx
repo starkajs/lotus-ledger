@@ -325,18 +325,30 @@ export default function StripeIntegration({
 
                 {verifyOk && (
                   <>
-                    <div className="flex items-center justify-between gap-4">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
                       <h3 className="text-lg">Recent balance transactions</h3>
-                      {selectedId && (
-                        <a
-                          href={`/api/stripe/transactions?account=${selectedId}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sm text-teal underline-offset-2 hover:underline"
+                      <div className="flex flex-wrap gap-3 text-sm">
+                        <Link
+                          to={
+                            selectedId
+                              ? `/integrations/stripe/transactions?account=${selectedId}`
+                              : "/integrations/stripe/transactions"
+                          }
+                          className="text-teal underline-offset-2 hover:underline"
                         >
-                          JSON API
-                        </a>
-                      )}
+                          All transactions
+                        </Link>
+                        {selectedId && (
+                          <a
+                            href={`/api/stripe/transactions?account=${selectedId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-teal underline-offset-2 hover:underline"
+                          >
+                            JSON API
+                          </a>
+                        )}
+                      </div>
                     </div>
 
                     {transactions.length === 0 ? (

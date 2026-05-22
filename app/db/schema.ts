@@ -1,6 +1,7 @@
 import {
   boolean,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -90,6 +91,49 @@ export const communityMemberStripeLinks = pgTable("community_member_stripe_links
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Stripe Balance Transaction (txn_…), synced per saved Stripe connection.
+ * Amounts are in minor units (cents) as returned by Stripe.
+ */
+export const stripeBalanceTransactions = pgTable(
+  "stripe_balance_transactions",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    stripeConnectionId: uuid("stripe_connection_id")
+      .notNull()
+      .references(() => stripeConnections.id, { onDelete: "cascade" }),
+    stripeBalanceTransactionId: text("stripe_balance_transaction_id").notNull(),
+    amount: integer().notNull(),
+    currency: text().notNull(),
+    net: integer().notNull(),
+    fee: integer().notNull(),
+    type: text().notNull(),
+    status: text().notNull(),
+    description: text(),
+    sourceId: text("source_id"),
+    reportingCategory: text("reporting_category"),
+    availableOn: timestamp("available_on", { withTimezone: true }),
+    stripeCreatedAt: timestamp("stripe_created_at", { withTimezone: true }).notNull(),
+    stripeCustomerId: text("stripe_customer_id"),
+    communityMemberId: uuid("community_member_id").references(
+      () => communityMembers.id,
+      { onDelete: "set null" },
+    ),
+    /** Full Stripe Balance Transaction object as returned by the API. */
+    stripeRaw: jsonb("stripe_raw").$type<Record<string, unknown>>(),
+    pushedToQuickbooks: boolean("pushed_to_quickbooks").notNull().default(false),
+    quickbooksPushedAt: timestamp("quickbooks_pushed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("stripe_txn_conn_txn_unique").on(
+      table.stripeConnectionId,
+      table.stripeBalanceTransactionId,
+    ),
+  ],
+);
 
 export const quickbooksConnections = pgTable("quickbooks_connections", {
   id: uuid().primaryKey().defaultRandom(),

@@ -1,7 +1,9 @@
+import type Stripe from "stripe";
 import { and, asc, count, eq, gte, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "~/db";
 import { communityMemberStripeLinks, communityMembers } from "~/db/schema";
 import { countryCodesMatchingSearch } from "~/lib/country-code.server";
+import { stripeCustomerToMemberInput } from "~/lib/stripe-customer.server";
 
 export const COMMUNITY_MEMBERS_PAGE_SIZE = 25;
 
@@ -413,5 +415,103 @@ export async function upsertCommunityMemberFromStripe(
     status: memberByEmail ? "updated" : "created",
     memberId,
     linkId: insertedLink.id,
+  };
+}
+
+export type EnsureCommunityMemberResult = {
+  communityMemberId: string | null;
+  memberEmail: string | null;
+  memberName: string | null;
+  stripeCustomerId: string;
+};
+
+/** Find or create a community member for a Stripe customer id. */
+export async function ensureCommunityMemberForStripeCustomer(
+  stripe: Stripe,
+  connectionId: string,
+  customerId: string,
+): Promise<EnsureCommunityMemberResult> {
+  const db = getDb();
+
+  const [existing] = await db
+    .select({
+      memberId: communityMembers.id,
+      email: communityMembers.email,
+      name: communityMembers.name,
+    })
+    .from(communityMemberStripeLinks)
+    .innerJoin(
+      communityMembers,
+      eq(communityMemberStripeLinks.communityMemberId, communityMembers.id),
+    )
+    .where(eq(communityMemberStripeLinks.stripeCustomerId, customerId))
+    .limit(1);
+
+  if (existing) {
+    return {
+      communityMemberId: existing.memberId,
+      memberEmail: existing.email,
+      memberName: existing.name,
+      stripeCustomerId: customerId,
+    };
+  }
+
+  const customer = await stripe.customers.retrieve(customerId);
+  if (customer.deleted || !customer.email) {
+    return {
+      communityMemberId: null,
+      memberEmail: null,
+      memberName: null,
+      stripeCustomerId: customerId,
+    };
+  }
+
+  const result = await upsertCommunityMemberFromStripe(
+    stripeCustomerToMemberInput(connectionId, customer),
+  );
+
+  if (result.status === "conflict") {
+    const [linked] = await db
+      .select({
+        memberId: communityMembers.id,
+        email: communityMembers.email,
+        name: communityMembers.name,
+      })
+      .from(communityMemberStripeLinks)
+      .innerJoin(
+        communityMembers,
+        eq(communityMemberStripeLinks.communityMemberId, communityMembers.id),
+      )
+      .where(eq(communityMemberStripeLinks.stripeCustomerId, customerId))
+      .limit(1);
+
+    if (linked) {
+      return {
+        communityMemberId: linked.memberId,
+        memberEmail: linked.email,
+        memberName: linked.name,
+        stripeCustomerId: customerId,
+      };
+    }
+
+    return {
+      communityMemberId: null,
+      memberEmail: customer.email,
+      memberName: customer.name ?? null,
+      stripeCustomerId: customerId,
+    };
+  }
+
+  const [member] = await db
+    .select({ email: communityMembers.email, name: communityMembers.name })
+    .from(communityMembers)
+    .where(eq(communityMembers.id, result.memberId))
+    .limit(1);
+
+  return {
+    communityMemberId: result.memberId,
+    memberEmail: member?.email ?? customer.email,
+    memberName: member?.name ?? customer.name ?? null,
+    stripeCustomerId: customerId,
   };
 }

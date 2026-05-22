@@ -5,7 +5,8 @@ const navItems: { to: string; label: string; end?: boolean }[] = [
   { to: "/home", label: "Home", end: true },
   { to: "/community", label: "Community" },
   { to: "/users", label: "Users" },
-  { to: "/integrations/stripe", label: "Stripe" },
+  { to: "/integrations/stripe", label: "Stripe", end: true },
+  { to: "/integrations/stripe/transactions", label: "Transactions" },
   { to: "/integrations/quickbooks", label: "QuickBooks" },
 ];
 
