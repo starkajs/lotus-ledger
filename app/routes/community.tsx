@@ -6,6 +6,7 @@ import {
   COMMUNITY_MEMBERS_PAGE_SIZE,
   listCommunityMembers,
 } from "~/lib/community-members.server";
+import { formatMoneyMinor } from "~/lib/money";
 import { requireUser } from "~/lib/session.server";
 import { listStripeConnections } from "~/lib/stripe-connections.server";
 import { syncCommunityMembersFromStripe } from "~/lib/sync-community-from-stripe.server";
@@ -269,7 +270,7 @@ export default function CommunityPage({
       ) : (
         <>
           <div className="mt-4 overflow-x-auto rounded-jamyang-lg border border-sand-dark/50">
-            <table className="w-full min-w-[36rem] text-left text-sm">
+            <table className="w-full min-w-[42rem] text-left text-sm">
               <thead className="bg-surface text-dark">
                 <tr>
                   <th className="px-4 py-3 font-medium">Member</th>
@@ -279,6 +280,9 @@ export default function CommunityPage({
                   <th className="px-4 py-3 font-medium">City</th>
                   <th className="px-4 py-3 font-medium">Country</th>
                   <th className="px-4 py-3 font-medium">Joined</th>
+                  <th className="px-4 py-3 font-medium text-right">
+                    Stripe gross
+                  </th>
                   <th className="px-4 py-3 font-medium">Stripe accounts</th>
                 </tr>
               </thead>
@@ -314,6 +318,19 @@ export default function CommunityPage({
                     </td>
                     <td className="px-4 py-3 text-ink-muted whitespace-nowrap">
                       {formatDate(member.joinedAt)}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-dark whitespace-nowrap">
+                      {member.stripeGrossByCurrency.length === 0 ? (
+                        <span className="text-ink-faint">—</span>
+                      ) : (
+                        <span className="flex flex-col items-end gap-0.5">
+                          {member.stripeGrossByCurrency.map((t) => (
+                            <span key={t.currency}>
+                              {formatMoneyMinor(t.amountMinor, t.currency)}
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       {member.stripeLinks.length === 0 ? (

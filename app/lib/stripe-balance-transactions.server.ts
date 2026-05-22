@@ -1,5 +1,18 @@
 import type Stripe from "stripe";
-import { and, asc, count, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+  sql,
+  sum,
+} from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   communityMembers,
@@ -479,6 +492,53 @@ export type ListStripeBalanceTransactionsForMemberOptions = {
   page?: number;
   pageSize?: number;
 };
+
+export type StripeGrossByCurrency = {
+  currency: string;
+  amountMinor: number;
+};
+
+/** Sum Stripe balance `amount` (gross, minor units) per member and currency. */
+export async function sumStripeGrossByCommunityMemberIds(
+  memberIds: string[],
+): Promise<Map<string, StripeGrossByCurrency[]>> {
+  const result = new Map<string, StripeGrossByCurrency[]>();
+  if (memberIds.length === 0) return result;
+
+  const db = getDb();
+  const rows = await db
+    .select({
+      communityMemberId: stripeBalanceTransactions.communityMemberId,
+      currency: stripeBalanceTransactions.currency,
+      totalMinor: sum(stripeBalanceTransactions.amount),
+    })
+    .from(stripeBalanceTransactions)
+    .where(
+      and(
+        inArray(stripeBalanceTransactions.communityMemberId, memberIds),
+        gt(stripeBalanceTransactions.amount, 0),
+      ),
+    )
+    .groupBy(
+      stripeBalanceTransactions.communityMemberId,
+      stripeBalanceTransactions.currency,
+    );
+
+  for (const row of rows) {
+    if (!row.communityMemberId) continue;
+    const total = Number(row.totalMinor ?? 0);
+    if (total <= 0) continue;
+    const list = result.get(row.communityMemberId) ?? [];
+    list.push({ currency: row.currency, amountMinor: total });
+    result.set(row.communityMemberId, list);
+  }
+
+  for (const [, totals] of result) {
+    totals.sort((a, b) => a.currency.localeCompare(b.currency));
+  }
+
+  return result;
+}
 
 export async function countStripeBalanceTransactionsForMember(
   communityMemberId: string,

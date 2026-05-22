@@ -4,6 +4,10 @@ import { getDb } from "~/db";
 import { communityMemberStripeLinks, communityMembers } from "~/db/schema";
 import { normalizeCountryCode } from "~/lib/country-code";
 import { countryCodesMatchingSearch } from "~/lib/country-code.server";
+import {
+  sumStripeGrossByCommunityMemberIds,
+  type StripeGrossByCurrency,
+} from "~/lib/stripe-balance-transactions.server";
 import { stripeCustomerToMemberInput } from "~/lib/stripe-customer.server";
 
 export const COMMUNITY_MEMBERS_PAGE_SIZE = 25;
@@ -136,17 +140,20 @@ function buildSearchCondition(options: ListCommunityMembersOptions) {
   return and(...parts);
 }
 
-async function attachStripeLinks(
+async function attachStripeLinksAndGross(
   rows: Array<typeof communityMembers.$inferSelect>,
 ): Promise<CommunityMember[]> {
   if (rows.length === 0) return [];
 
   const db = getDb();
   const memberIds = rows.map((r) => r.id);
-  const links = await db
-    .select()
-    .from(communityMemberStripeLinks)
-    .where(inArray(communityMemberStripeLinks.communityMemberId, memberIds));
+  const [links, grossByMember] = await Promise.all([
+    db
+      .select()
+      .from(communityMemberStripeLinks)
+      .where(inArray(communityMemberStripeLinks.communityMemberId, memberIds)),
+    sumStripeGrossByCommunityMemberIds(memberIds),
+  ]);
 
   const linksByMember = new Map<string, CommunityMemberStripeLink[]>();
   for (const link of links) {
@@ -170,6 +177,7 @@ async function attachStripeLinks(
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     stripeLinks: linksByMember.get(row.id) ?? [],
+    stripeGrossByCurrency: grossByMember.get(row.id) ?? [],
   }));
 }
 
@@ -200,7 +208,7 @@ export async function listCommunityMembers(
     .limit(pageSize)
     .offset(offset);
 
-  const members = await attachStripeLinks(rows);
+  const members = await attachStripeLinksAndGross(rows);
 
   return {
     members,
@@ -223,7 +231,7 @@ export async function getCommunityMemberById(
 
   if (!row) return null;
 
-  const [member] = await attachStripeLinks([row]);
+  const [member] = await attachStripeLinksAndGross([row]);
   return member ?? null;
 }
 
