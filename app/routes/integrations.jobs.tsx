@@ -5,10 +5,11 @@ import {
   formatJobDuration,
   INTEGRATION_JOB_TYPE_LABELS,
   INTEGRATION_JOB_TYPES,
-  listIntegrationJobRuns,
+  isIntegrationJobType,
   summarizeJobResult,
   type IntegrationJobType,
-} from "~/lib/integration-jobs.server";
+} from "~/lib/integration-jobs";
+import { listIntegrationJobRuns } from "~/lib/integration-jobs.server";
 import { requireUser } from "~/lib/session.server";
 
 function formatWhen(iso: string) {
@@ -36,9 +37,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
   const jobTypeRaw = url.searchParams.get("type")?.trim() ?? "";
-  const jobType = INTEGRATION_JOB_TYPES.includes(jobTypeRaw as IntegrationJobType)
-    ? (jobTypeRaw as IntegrationJobType)
-    : undefined;
+  const jobType = isIntegrationJobType(jobTypeRaw) ? jobTypeRaw : undefined;
 
   const list = await listIntegrationJobRuns({ page, jobType });
 
