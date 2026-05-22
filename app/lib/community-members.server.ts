@@ -1,4 +1,4 @@
-import { and, asc, count, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, gte, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { getDb } from "~/db";
 import { communityMemberStripeLinks, communityMembers } from "~/db/schema";
 import { countryCodesMatchingSearch } from "~/lib/country-code.server";
@@ -43,6 +43,8 @@ export type ListCommunityMembersOptions = {
   q?: string;
   /** Substring match on `country_code` only (e.g. GB, G). */
   country?: string;
+  /** Members with `joined_at` within the last N days (from Stripe customer.created). */
+  joinedDays?: number;
   page?: number;
   pageSize?: number;
 };
@@ -101,10 +103,29 @@ function buildCountryFilterCondition(country: string) {
   return ilike(communityMembers.countryCode, pattern);
 }
 
+function buildJoinedWithinDaysCondition(days: number) {
+  const safeDays = Math.max(1, Math.floor(days));
+  const since = new Date();
+  since.setDate(since.getDate() - safeDays);
+
+  return and(
+    isNotNull(communityMembers.joinedAt),
+    gte(communityMembers.joinedAt, since),
+  );
+}
+
 function buildSearchCondition(options: ListCommunityMembersOptions) {
+  const joinedDays =
+    options.joinedDays !== undefined && options.joinedDays > 0
+      ? options.joinedDays
+      : undefined;
+
   const parts = [
     buildTextSearchCondition(options.q ?? ""),
     buildCountryFilterCondition(options.country ?? ""),
+    joinedDays !== undefined
+      ? buildJoinedWithinDaysCondition(joinedDays)
+      : undefined,
   ].filter((part): part is NonNullable<typeof part> => part !== undefined);
 
   if (parts.length === 0) return undefined;

@@ -18,13 +18,26 @@ function formatDate(iso: string | null) {
   });
 }
 
-function pageHref(page: number, q: string, country: string) {
+type CommunityFilters = {
+  q: string;
+  country: string;
+  joinedDays?: number;
+};
+
+function pageHref(page: number, filters: CommunityFilters) {
   const params = new URLSearchParams();
-  if (q) params.set("q", q);
-  if (country) params.set("country", country);
+  if (filters.q) params.set("q", filters.q);
+  if (filters.country) params.set("country", filters.country);
+  if (filters.joinedDays) params.set("joinedDays", String(filters.joinedDays));
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `?${query}` : "?";
+}
+
+function parseJoinedDays(raw: string | null): number | undefined {
+  if (!raw?.trim()) return undefined;
+  const days = Math.floor(Number(raw));
+  return Number.isFinite(days) && days > 0 ? days : undefined;
 }
 
 export function meta({}: Route.MetaArgs) {
@@ -39,12 +52,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const q = url.searchParams.get("q")?.trim() ?? "";
   const country = url.searchParams.get("country")?.trim() ?? "";
+  const joinedDays = parseJoinedDays(url.searchParams.get("joinedDays"));
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
 
   const [memberList, connections] = await Promise.all([
     listCommunityMembers({
       q,
       country,
+      joinedDays,
       page,
       pageSize: COMMUNITY_MEMBERS_PAGE_SIZE,
     }),
@@ -59,6 +74,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     ...memberList,
     q,
     country,
+    joinedDays,
     connectionLabels,
     connectionCount: connections.length,
   };
@@ -96,11 +112,13 @@ export default function CommunityPage({
     totalPages,
     q,
     country,
+    joinedDays,
     connectionLabels,
     connectionCount,
   } = loaderData;
 
-  const hasFilters = Boolean(q || country);
+  const filters: CommunityFilters = { q, country, joinedDays };
+  const hasFilters = Boolean(q || country || joinedDays);
   const [searchParams] = useSearchParams();
 
   const syncResult =
@@ -198,18 +216,41 @@ export default function CommunityPage({
             className="w-28 rounded-jamyang border border-sand-dark/60 bg-surface px-3 py-2 text-sm uppercase"
             aria-label="Filter by country code"
           />
+          <label className="flex items-center gap-1.5 text-sm text-ink-muted">
+            <span className="whitespace-nowrap">Joined within</span>
+            <input
+              type="number"
+              name="joinedDays"
+              min={1}
+              step={1}
+              defaultValue={joinedDays ?? ""}
+              placeholder="30"
+              className="w-16 rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-2 text-sm text-dark"
+              aria-label="Joined within number of days"
+            />
+            <span>days</span>
+          </label>
           <button
             type="submit"
             className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 text-sm hover:bg-surface"
           >
             Search
           </button>
+          {hasFilters && (
+            <Link
+              to="/community"
+              className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 text-sm text-ink-muted hover:bg-surface hover:text-dark"
+            >
+              Clear filters
+            </Link>
+          )}
         </form>
       </div>
       <p id="community-search-hint" className="mt-1 text-xs text-ink-faint">
         General search matches name, email, city, or Stripe customer id. Country
         filter matches <code className="text-dark">country_code</code> only (partial,
-        e.g. G or GB).
+        e.g. G or GB). Joined filter uses Stripe join date and excludes members with
+        no join date.
       </p>
 
       {members.length === 0 ? (
@@ -286,7 +327,7 @@ export default function CommunityPage({
               <div className="flex gap-2">
                 {page > 1 ? (
                   <Link
-                    to={pageHref(page - 1, q, country)}
+                    to={pageHref(page - 1, filters)}
                     className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 hover:bg-surface"
                   >
                     Previous
@@ -298,7 +339,7 @@ export default function CommunityPage({
                 )}
                 {page < totalPages ? (
                   <Link
-                    to={pageHref(page + 1, q, country)}
+                    to={pageHref(page + 1, filters)}
                     className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 hover:bg-surface"
                   >
                     Next
