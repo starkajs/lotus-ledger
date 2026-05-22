@@ -36,9 +36,13 @@ Your application will be available at `http://localhost:5173`.
 
 ## Integrations
 
+### Authentication
+
+See **[docs/auth-setup.md](docs/auth-setup.md)**. Users are invite-only: seed the first user with `npm run db:seed`, invite others via `/integrations/invite` or `npm run invite-user` (Resend email when configured). Set `SESSION_SECRET`, `ENCRYPTION_KEY`, and `DATABASE_URL`, run migrations, then sign in at `/login`.
+
 ### Stripe
 
-See **[docs/stripe-setup.md](docs/stripe-setup.md)**. Add `STRIPE_SECRET_KEY` to `.env`, then open `/integrations/stripe` to verify transactions load. Multiple accounts via encrypted DB storage is planned next.
+See **[docs/stripe-setup.md](docs/stripe-setup.md)**. After logging in, add Stripe secret keys at `/integrations/stripe` (encrypted in Postgres; multiple accounts supported).
 
 ### QuickBooks Online
 

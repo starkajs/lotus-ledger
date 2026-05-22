@@ -49,6 +49,14 @@ export function isQuickBooksConfigured(): boolean {
   return Boolean(getQuickBooksClientId() && getQuickBooksClientSecret());
 }
 
+export function getResendApiKey(): string | undefined {
+  return (
+    process.env.RESEND_API_KEY?.trim() ||
+    process.env.resend_api_key?.trim() ||
+    undefined
+  );
+}
+
 export function getOAuthStateSecret(): string {
   const secret = process.env.SESSION_SECRET?.trim();
   if (secret) return secret;

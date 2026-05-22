@@ -2,7 +2,16 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 
-const databaseUrl = process.env.DATABASE_URL;
+// Load .env for local dev only (Fly injects DATABASE_URL; dotenv is devDependency)
+if (!process.env.DATABASE_URL) {
+  try {
+    await import("dotenv/config");
+  } catch {
+    // dotenv not available in production image
+  }
+}
+
+const databaseUrl = process.env.DATABASE_URL?.trim();
 
 if (!databaseUrl) {
   console.error("DATABASE_URL is required");

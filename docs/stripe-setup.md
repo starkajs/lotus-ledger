@@ -1,57 +1,45 @@
 # Stripe integration
 
-Lotus Ledger reads **balance transactions** from Stripe (amount, fees, net, type, description). All calls are server-side — the secret key never reaches the browser.
+Lotus Ledger reads **balance transactions** from Stripe (amount, fees, net, type, description). Secret keys are stored **encrypted in Postgres** and never shown in the UI after save.
 
-## Current setup (single account)
+## Prerequisites
 
-Use one restricted secret key in `.env` to prove the integration works:
+1. `DATABASE_URL`, `SESSION_SECRET`, and `ENCRYPTION_KEY` in `.env` (see [auth-setup.md](auth-setup.md))
+2. `npm run db:migrate`
+3. An invited user — `npm run invite-user -- you@example.com "password"`
 
-```env
-STRIPE_SECRET_KEY=sk_test_...
-```
+## Add Stripe accounts
 
-Restart after changes:
-
-```bash
-npm run dev
-```
-
-Validate at:
-
-- **UI:** [http://localhost:5173/integrations/stripe](http://localhost:5173/integrations/stripe)
-- **JSON:** [http://localhost:5173/api/stripe/transactions](http://localhost:5173/api/stripe/transactions)
-
-Swap the key in `.env` to test a different Stripe account.
-
-## Multiple accounts (planned)
-
-Jamyang has more than one Stripe account. Later we will:
-
-1. Store **one encrypted secret key per account** in Postgres (`stripe_connections` table — migration already in `db/migrations/`).
-2. Remove per-account keys from `.env`.
-3. Select which account to query in the UI or API.
-
-The schema and `npm run db:migrate` are ready when `DATABASE_URL` is configured; Stripe does not require the database until then.
-
-## Production (Fly.io)
-
-```powershell
-fly secrets set STRIPE_SECRET_KEY=sk_live_... --app lotus-ledger
-```
+1. Sign in at `/login`
+2. Open `/integrations/stripe`
+3. For each Jamyang Stripe account, enter a **label** and **secret key** (`sk_test_…` or `sk_live_…`)
+4. The app verifies the key, stores it encrypted, and shows only the label, last four characters, and live/test mode
 
 ## API
 
-`GET /api/stripe/transactions`
+`GET /api/stripe/transactions?account=<connection-uuid>` (requires login session)
 
 | Parameter | Description |
 |-----------|-------------|
+| `account` | Required — UUID from the integrations page |
 | `limit` | Optional, max 100, default 25 |
 | `starting_after` | Stripe pagination cursor |
+
+## Production (Fly.io)
+
+Set encryption and session secrets (not per-account Stripe keys in env):
+
+```powershell
+fly secrets set ENCRYPTION_KEY=... SESSION_SECRET=... --app lotus-ledger
+```
+
+Add keys via the integrations UI after deploy.
 
 ## Troubleshooting
 
 | Error | Fix |
 |-------|-----|
-| `STRIPE_SECRET_KEY is not configured` | Add `.env` and restart `npm run dev` |
-| `Invalid API Key` | Check the key is complete with no extra spaces |
+| Redirect to login | Sign in at `/login` |
+| `ENCRYPTION_KEY must be set` | Add a 32+ character secret to `.env` / Fly secrets |
+| Invalid secret key | Use **secret** key (`sk_` or `rk_`), not publishable (`pk_`). Paste without quotes; restricted keys use `rk_test_` / `rk_live_` |
 | Empty transactions | Normal for a new test account — create a test payment in Stripe |

@@ -5,8 +5,11 @@ import {
   verifyQuickBooksConnection,
 } from "~/lib/quickbooks-api.server";
 import { getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
+import { requireUser } from "~/lib/session.server";
 
 export async function loader({ request }: Route.LoaderArgs) {
+  await requireUser(request);
+
   if (!isQuickBooksConfigured()) {
     return Response.json(
       { ok: false, error: "QuickBooks app credentials are not configured" },

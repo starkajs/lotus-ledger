@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import { useCookieConsent } from "./cookie-consent-provider";
 import { SiteFooter } from "./site-footer";
 
@@ -68,15 +69,12 @@ export function LandingPage() {
             </span>
             <span className="font-serif text-lg text-dark">Lotus Ledger</span>
           </a>
-          <button
-            type="button"
+          <Link
+            to="/login"
             className="rounded-jamyang-pill bg-maroon px-5 py-2 text-sm font-medium text-surface-overlay transition-colors hover:bg-maroon-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-maroon"
-            onClick={() => {
-              /* placeholder — auth not yet implemented */
-            }}
           >
             Log in
-          </button>
+          </Link>
         </div>
       </header>
 
@@ -148,15 +146,12 @@ export function LandingPage() {
               Sign in to connect your accounts and start building a clearer
               picture of your organisation&apos;s finances.
             </p>
-            <button
-              type="button"
-              className="mt-8 rounded-jamyang-pill bg-surface-overlay px-6 py-2.5 text-sm font-medium text-maroon transition-colors hover:bg-sand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-surface-overlay"
-              onClick={() => {
-                /* placeholder — auth not yet implemented */
-              }}
+            <Link
+              to="/login"
+              className="mt-8 inline-block rounded-jamyang-pill bg-surface-overlay px-6 py-2.5 text-sm font-medium text-maroon transition-colors hover:bg-sand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-surface-overlay"
             >
               Log in
-            </button>
+            </Link>
           </div>
         </section>
       </main>

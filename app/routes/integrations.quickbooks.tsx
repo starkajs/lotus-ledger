@@ -5,6 +5,7 @@ import {
   getQuickBooksEnvironment,
   isQuickBooksConfigured,
 } from "~/lib/env.server";
+import { requireUser } from "~/lib/session.server";
 import {
   fetchQuickBooksInvoices,
   verifyQuickBooksConnection,
@@ -20,13 +21,15 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
-export async function loader({}: Route.LoaderArgs) {
+export async function loader({ request }: Route.LoaderArgs) {
+  const user = await requireUser(request);
   const appConfigured = isQuickBooksConfigured();
   const tokens = await getQuickBooksTokens();
   const connected = Boolean(tokens);
 
   if (!appConfigured) {
     return {
+      user,
       appConfigured: false as const,
       connected: false,
       connection: null,
@@ -42,6 +45,7 @@ export async function loader({}: Route.LoaderArgs) {
 
   if (!connected) {
     return {
+      user,
       appConfigured: true as const,
       connected: false,
       connection: null,
@@ -57,6 +61,7 @@ export async function loader({}: Route.LoaderArgs) {
     const invoices = connection.ok ? await fetchQuickBooksInvoices(25) : [];
 
     return {
+      user,
       appConfigured: true as const,
       connected: true,
       connection,
@@ -68,6 +73,7 @@ export async function loader({}: Route.LoaderArgs) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return {
+      user,
       appConfigured: true as const,
       connected: true,
       connection: {
@@ -84,6 +90,7 @@ export async function loader({}: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
+  await requireUser(request);
   const formData = await request.formData();
   if (formData.get("intent") === "disconnect") {
     await clearQuickBooksTokens();
@@ -126,7 +133,15 @@ export default function QuickBooksIntegration({
           >
             ← Home
           </Link>
-          <span className="text-sm text-ink-muted">QuickBooks validation</span>
+          <div className="flex items-center gap-4 text-sm text-ink-muted">
+            <span>{loaderData.user.email}</span>
+            <Link
+              to="/logout"
+              className="text-teal underline-offset-2 hover:underline"
+            >
+              Log out
+            </Link>
+          </div>
         </div>
       </header>
 

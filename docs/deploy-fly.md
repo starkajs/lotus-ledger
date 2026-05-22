@@ -98,12 +98,20 @@ Set production secrets as you need them — for example:
 fly secrets set `
   APP_URL=https://lotus-ledger.fly.dev `
   SESSION_SECRET=your-long-random-string `
+  ENCRYPTION_KEY=your-32-char-or-longer-secret `
   QUICKBOOKS_CLIENT_ID=... `
   QUICKBOOKS_CLIENT_SECRET=... `
   QUICKBOOKS_ENVIRONMENT=production `
-  STRIPE_SECRET_KEY=... `
   --app lotus-ledger
 ```
+
+Seed the first user (set `SEED_USER_EMAIL` / `SEED_USER_PASSWORD` in `.env`, proxy `DATABASE_URL` if needed):
+
+```powershell
+npm run db:seed
+```
+
+For later invites with email, set `RESEND_API_KEY` and `RESEND_FROM` on Fly, then use `/integrations/invite` or `npm run invite-user`.
 
 Register `https://lotus-ledger.fly.dev/integrations/quickbooks/callback` in the Intuit developer portal.
 
@@ -147,6 +155,6 @@ fly mpg connect --org aptim-solutions
 | Health 503 database error | Run step 4 after attach |
 | Build fails locally | `docker build -t lotus-ledger .` |
 
-## Next: authentication
+## Authentication
 
-Auth is **not** deployed yet. After Fly + Drizzle migrations are working, we add login using the `users` / `sessions` tables in the Drizzle schema.
+See **[auth-setup.md](auth-setup.md)** — invite users, sign in at `/login`, then configure integrations.

@@ -1,6 +1,7 @@
 import { redirect } from "react-router";
 import type { Route } from "./+types/integrations.quickbooks.callback";
 import { getCookie } from "~/lib/http.server";
+import { requireUser } from "~/lib/session.server";
 import {
   clearQuickBooksOAuthStateCookie,
   completeQuickBooksOAuth,
@@ -8,6 +9,7 @@ import {
 } from "~/lib/quickbooks-oauth.server";
 
 export async function loader({ request }: Route.LoaderArgs) {
+  await requireUser(request);
   const url = new URL(request.url);
   const error = url.searchParams.get("error");
   const errorDescription = url.searchParams.get("error_description");

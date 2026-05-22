@@ -1,6 +1,5 @@
 import type Stripe from "stripe";
-import { getStripeMode } from "./env.server";
-import { getStripe } from "./stripe.server";
+import { getStripeClientForConnection } from "./stripe-connections.server";
 
 export type StripeTransactionSummary = {
   id: string;
@@ -18,7 +17,7 @@ export type StripeTransactionSummary = {
 export type StripeTransactionsResult = {
   transactions: StripeTransactionSummary[];
   hasMore: boolean;
-  mode: "test" | "live";
+  livemode: boolean;
 };
 
 const ZERO_DECIMAL = new Set([
@@ -50,14 +49,15 @@ function mapBalanceTransaction(tx: Stripe.BalanceTransaction): StripeTransaction
 }
 
 export type FetchStripeTransactionsOptions = {
+  connectionId: string;
   limit?: number;
   startingAfter?: string;
 };
 
 export async function fetchStripeTransactions(
-  options: FetchStripeTransactionsOptions = {},
+  options: FetchStripeTransactionsOptions,
 ): Promise<StripeTransactionsResult> {
-  const stripe = getStripe();
+  const stripe = await getStripeClientForConnection(options.connectionId);
   const limit = Math.min(options.limit ?? 25, 100);
 
   const page = await stripe.balanceTransactions.list({
@@ -65,35 +65,11 @@ export async function fetchStripeTransactions(
     starting_after: options.startingAfter,
   });
 
+  const balance = await stripe.balance.retrieve();
+
   return {
     transactions: page.data.map(mapBalanceTransaction),
     hasMore: page.has_more,
-    mode: getStripeMode(),
+    livemode: balance.livemode,
   };
-}
-
-export async function verifyStripeConnection(): Promise<{
-  ok: boolean;
-  currency?: string;
-  availableBalance?: number;
-  mode: "test" | "live";
-  error?: string;
-}> {
-  try {
-    const stripe = getStripe();
-    const balance = await stripe.balance.retrieve();
-    const primary = balance.available[0];
-
-    return {
-      ok: true,
-      currency: primary?.currency,
-      availableBalance: primary
-        ? formatAmount(primary.amount, primary.currency)
-        : undefined,
-      mode: getStripeMode(),
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown Stripe error";
-    return { ok: false, mode: getStripeMode(), error: message };
-  }
 }
