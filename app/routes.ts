@@ -51,6 +51,10 @@ export default [
       "routes/integrations.woocommerce.orders.tsx",
     ),
     route(
+      "integrations/woocommerce/orders/summary",
+      "routes/integrations.woocommerce.orders.summary.tsx",
+    ),
+    route(
       "integrations/woocommerce/orders/:orderId",
       "routes/integrations.woocommerce.orders.$orderId.tsx",
     ),

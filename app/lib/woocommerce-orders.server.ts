@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, inArray, lt, max, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, max, sql } from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   communityMembers,
@@ -12,7 +12,8 @@ import {
   ensureCommunityMemberForEmail,
 } from "~/lib/community-members.server";
 import {
-  dateRangeToCreatedBounds,
+  calendarDateCreatedGte,
+  calendarDateCreatedLte,
   type IsoDateString,
 } from "~/lib/date-range-filters";
 import type { WooCommerceOrder } from "~/lib/woocommerce-api.server";
@@ -338,15 +339,15 @@ function buildWooCommerceOrdersWhere(options: ListWooCommerceOrdersOptions) {
     filters.push(eq(woocommerceOrders.status, options.status));
   }
 
-  const { createdGte, createdLt } = dateRangeToCreatedBounds({
-    from: options.dateFrom ?? null,
-    to: options.dateTo ?? null,
-  });
-  if (createdGte) {
-    filters.push(gte(woocommerceOrders.dateCreated, createdGte));
+  if (options.dateFrom) {
+    filters.push(
+      calendarDateCreatedGte(woocommerceOrders.dateCreated, options.dateFrom),
+    );
   }
-  if (createdLt) {
-    filters.push(lt(woocommerceOrders.dateCreated, createdLt));
+  if (options.dateTo) {
+    filters.push(
+      calendarDateCreatedLte(woocommerceOrders.dateCreated, options.dateTo),
+    );
   }
 
   if (options.lotusProductMissing) {
@@ -569,6 +570,296 @@ export async function setWooCommerceOrderLotusProduct(
     .where(eq(woocommerceOrders.id, orderId));
 
   return getWooCommerceOrderById(orderId);
+}
+
+const UNMAPPED_LOTUS_KEY = "__unmapped__";
+
+export type WooCommerceOrderLineProductAggregate = {
+  wcProductId: number | null;
+  name: string;
+  sku: string | null;
+  currency: string;
+  amountMinor: number;
+  quantity: number;
+};
+
+export type WooCommerceLotusProductAggregate = {
+  catalogProductId: string | null;
+  code: string | null;
+  name: string;
+  unmapped: boolean;
+  lines: WooCommerceOrderLineProductAggregate[];
+  subtotals: { currency: string; amountMinor: number }[];
+};
+
+export type WooCommerceOrdersByProductResult = {
+  configured: boolean;
+  siteUrl: string | null;
+  orderCount: number;
+  groups: WooCommerceLotusProductAggregate[];
+  grandTotals: { currency: string; amountMinor: number }[];
+};
+
+function lineProductKey(line: WooCommerceOrderLineItem): string {
+  return `${line.productId ?? 0}\0${line.sku ?? ""}\0${line.name}`;
+}
+
+function lineAmountMinor(line: WooCommerceOrderLineItem): number {
+  return line.totalMinor ?? line.subtotalMinor ?? 0;
+}
+
+type LotusBucket = {
+  catalogProductId: string | null;
+  code: string | null;
+  name: string;
+  unmapped: boolean;
+  lines: Map<
+    string,
+    {
+      wcProductId: number | null;
+      name: string;
+      sku: string | null;
+      byCurrency: Map<string, { amountMinor: number; quantity: number }>;
+    }
+  >;
+};
+
+export async function aggregateWooCommerceOrdersByLotusAndLine(
+  options: Omit<ListWooCommerceOrdersOptions, "page" | "pageSize"> = {},
+): Promise<WooCommerceOrdersByProductResult> {
+  const { isWooCommerceConfigured, getWooCommerceSiteUrl } = await import(
+    "~/lib/env.server"
+  );
+  const db = getDb();
+  const whereClause = buildWooCommerceOrdersWhere(options);
+
+  const orderRows = await db
+    .select({
+      currency: woocommerceOrders.currency,
+      lineItems: woocommerceOrders.lineItems,
+      productId: woocommerceOrders.productId,
+      totalMinor: woocommerceOrders.totalMinor,
+    })
+    .from(woocommerceOrders)
+    .where(whereClause);
+
+  const manualProductIds = [
+    ...new Set(
+      orderRows
+        .map((row) => row.productId)
+        .filter((id): id is string => id != null),
+    ),
+  ];
+
+  const [mappings, manualCatalogRows] = await Promise.all([
+    db
+      .select({
+        wcProductId: woocommerceProducts.wcProductId,
+        catalogProductId: products.id,
+        code: products.code,
+        name: products.name,
+      })
+      .from(woocommerceProducts)
+      .innerJoin(products, eq(woocommerceProducts.productId, products.id))
+      .where(isNotNull(woocommerceProducts.productId)),
+    manualProductIds.length > 0
+      ? db
+          .select({
+            id: products.id,
+            code: products.code,
+            name: products.name,
+          })
+          .from(products)
+          .where(inArray(products.id, manualProductIds))
+      : Promise.resolve([]),
+  ]);
+
+  const lotusByWcProductId = new Map(
+    mappings.map((m) => [m.wcProductId, m]),
+  );
+  const lotusByCatalogId = new Map(
+    manualCatalogRows.map((p) => [p.id, p]),
+  );
+
+  const buckets = new Map<string, LotusBucket>();
+
+  function ensureLotusBucket(key: string, lotus: {
+    catalogProductId: string | null;
+    code: string | null;
+    name: string;
+    unmapped: boolean;
+  }): LotusBucket {
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        catalogProductId: lotus.catalogProductId,
+        code: lotus.code,
+        name: lotus.name,
+        unmapped: lotus.unmapped,
+        lines: new Map(),
+      };
+      buckets.set(key, bucket);
+    }
+    return bucket;
+  }
+
+  for (const order of orderRows) {
+    const currency = order.currency;
+    const manualLotus = order.productId
+      ? lotusByCatalogId.get(order.productId)
+      : undefined;
+    const lines = order.lineItems ?? [];
+
+    if (lines.length === 0) {
+      if (!manualLotus) continue;
+      const lotus = {
+        key: manualLotus.id,
+        catalogProductId: manualLotus.id,
+        code: manualLotus.code,
+        name: manualLotus.name,
+        unmapped: false,
+      };
+      const bucket = ensureLotusBucket(lotus.key, lotus);
+      const lineKey = "__order_total__";
+      let lineBucket = bucket.lines.get(lineKey);
+      if (!lineBucket) {
+        lineBucket = {
+          wcProductId: null,
+          name: "(order total)",
+          sku: null,
+          byCurrency: new Map(),
+        };
+        bucket.lines.set(lineKey, lineBucket);
+      }
+      const existing = lineBucket.byCurrency.get(currency) ?? {
+        amountMinor: 0,
+        quantity: 0,
+      };
+      lineBucket.byCurrency.set(currency, {
+        amountMinor: existing.amountMinor + order.totalMinor,
+        quantity: existing.quantity + 1,
+      });
+      continue;
+    }
+
+    for (const line of lines) {
+      const wcLink =
+        line.productId != null && line.productId > 0
+          ? lotusByWcProductId.get(line.productId)
+          : undefined;
+
+      const lotus = wcLink
+        ? {
+            key: wcLink.catalogProductId,
+            catalogProductId: wcLink.catalogProductId,
+            code: wcLink.code,
+            name: wcLink.name,
+            unmapped: false,
+          }
+        : manualLotus
+          ? {
+              key: manualLotus.id,
+              catalogProductId: manualLotus.id,
+              code: manualLotus.code,
+              name: manualLotus.name,
+              unmapped: false,
+            }
+          : {
+              key: UNMAPPED_LOTUS_KEY,
+              catalogProductId: null,
+              code: null,
+              name: "Unmapped",
+              unmapped: true,
+            };
+
+      const bucket = ensureLotusBucket(lotus.key, lotus);
+      const lineKey = lineProductKey(line);
+      let lineBucket = bucket.lines.get(lineKey);
+      if (!lineBucket) {
+        lineBucket = {
+          wcProductId: line.productId,
+          name: line.name,
+          sku: line.sku,
+          byCurrency: new Map(),
+        };
+        bucket.lines.set(lineKey, lineBucket);
+      }
+
+      const amount = lineAmountMinor(line);
+      const existing = lineBucket.byCurrency.get(currency) ?? {
+        amountMinor: 0,
+        quantity: 0,
+      };
+      lineBucket.byCurrency.set(currency, {
+        amountMinor: existing.amountMinor + amount,
+        quantity: existing.quantity + line.quantity,
+      });
+    }
+  }
+
+  const grandByCurrency = new Map<string, number>();
+
+  const groups: WooCommerceLotusProductAggregate[] = [...buckets.values()]
+    .map((bucket) => {
+      const lines: WooCommerceOrderLineProductAggregate[] = [];
+      const subByCurrency = new Map<string, number>();
+
+      for (const lineBucket of bucket.lines.values()) {
+        for (const [cur, totals] of lineBucket.byCurrency) {
+          lines.push({
+            wcProductId: lineBucket.wcProductId,
+            name: lineBucket.name,
+            sku: lineBucket.sku,
+            currency: cur,
+            amountMinor: totals.amountMinor,
+            quantity: totals.quantity,
+          });
+          subByCurrency.set(
+            cur,
+            (subByCurrency.get(cur) ?? 0) + totals.amountMinor,
+          );
+          grandByCurrency.set(
+            cur,
+            (grandByCurrency.get(cur) ?? 0) + totals.amountMinor,
+          );
+        }
+      }
+
+      lines.sort((a, b) => {
+        const name = a.name.localeCompare(b.name);
+        if (name !== 0) return name;
+        return (a.sku ?? "").localeCompare(b.sku ?? "");
+      });
+
+      const subtotals = [...subByCurrency.entries()]
+        .map(([currency, amountMinor]) => ({ currency, amountMinor }))
+        .sort((a, b) => a.currency.localeCompare(b.currency));
+
+      return {
+        catalogProductId: bucket.catalogProductId,
+        code: bucket.code,
+        name: bucket.name,
+        unmapped: bucket.unmapped,
+        lines,
+        subtotals,
+      };
+    })
+    .sort((a, b) => {
+      if (a.unmapped !== b.unmapped) return a.unmapped ? 1 : -1;
+      return (a.code ?? a.name).localeCompare(b.code ?? b.name);
+    });
+
+  const grandTotals = [...grandByCurrency.entries()]
+    .map(([currency, amountMinor]) => ({ currency, amountMinor }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+
+  return {
+    configured: isWooCommerceConfigured(),
+    siteUrl: getWooCommerceSiteUrl() ?? null,
+    orderCount: orderRows.length,
+    groups,
+    grandTotals,
+  };
 }
 
 export async function listDistinctWooCommerceOrderStatuses(): Promise<string[]> {

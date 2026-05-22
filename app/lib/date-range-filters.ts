@@ -1,5 +1,11 @@
-/** Calendar date as YYYY-MM-DD (UTC). */
+import { sql, type SQL } from "drizzle-orm";
+import type { AnyColumn } from "drizzle-orm";
+
+/** Calendar date as YYYY-MM-DD in the app reporting timezone. */
 export type IsoDateString = string;
+
+/** Matches en-GB list formatting and WooCommerce order date filters. */
+export const APP_CALENDAR_TIMEZONE = "Europe/London";
 
 export const DATE_PERIOD_PRESETS = [
   "this-week",
@@ -34,87 +40,135 @@ export function parseIsoDateParam(value: string | null | undefined): IsoDateStri
   return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
-function toIsoDateUtc(date: Date): IsoDateString {
-  const y = date.getUTCFullYear();
-  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(date.getUTCDate()).padStart(2, "0");
+function calendarDateInZone(instant: Date, timeZone: string): IsoDateString {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(instant);
+  const y = parts.find((p) => p.type === "year")!.value;
+  const m = parts.find((p) => p.type === "month")!.value;
+  const d = parts.find((p) => p.type === "day")!.value;
   return `${y}-${m}-${d}`;
 }
 
-function utcToday(now: Date): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+function parseIsoParts(iso: IsoDateString): { y: number; m: number; d: number } {
+  const [y, m, d] = iso.split("-").map(Number);
+  return { y, m, d };
 }
 
-/** Monday 00:00 UTC of the week containing `date`. */
-function mondayUtc(date: Date): Date {
-  const day = date.getUTCDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + diff),
-  );
+function addCalendarDays(
+  iso: IsoDateString,
+  days: number,
+  timeZone: string,
+): IsoDateString {
+  const { y, m, d } = parseIsoParts(iso);
+  const instant = Date.UTC(y, m - 1, d, 12, 0, 0) + days * 86_400_000;
+  return calendarDateInZone(new Date(instant), timeZone);
 }
 
-function addDaysUtc(date: Date, days: number): Date {
-  return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + days),
-  );
+function weekdayIndexInZone(iso: IsoDateString, timeZone: string): number {
+  const { y, m, d } = parseIsoParts(iso);
+  const instant = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const wd = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+  }).format(instant);
+  const map: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  return map[wd] ?? 0;
+}
+
+function mondayOnOrBefore(iso: IsoDateString, timeZone: string): IsoDateString {
+  const dow = weekdayIndexInZone(iso, timeZone);
+  const diff = dow === 0 ? -6 : 1 - dow;
+  return addCalendarDays(iso, diff, timeZone);
+}
+
+function calendarToday(now: Date, timeZone: string): IsoDateString {
+  return calendarDateInZone(now, timeZone);
 }
 
 export function datePeriodPresetRange(
   preset: DatePeriodPreset,
   now = new Date(),
+  timeZone = APP_CALENDAR_TIMEZONE,
 ): { from: IsoDateString; to: IsoDateString } {
-  const today = utcToday(now);
-  const y = today.getUTCFullYear();
-  const m = today.getUTCMonth();
+  const today = calendarToday(now, timeZone);
+  const { y, m } = parseIsoParts(today);
 
   switch (preset) {
     case "this-week": {
-      const from = mondayUtc(today);
-      return { from: toIsoDateUtc(from), to: toIsoDateUtc(today) };
+      const from = mondayOnOrBefore(today, timeZone);
+      return { from, to: today };
     }
     case "last-week": {
-      const thisMonday = mondayUtc(today);
-      const from = addDaysUtc(thisMonday, -7);
-      const to = addDaysUtc(thisMonday, -1);
-      return { from: toIsoDateUtc(from), to: toIsoDateUtc(to) };
+      const thisMonday = mondayOnOrBefore(today, timeZone);
+      const from = addCalendarDays(thisMonday, -7, timeZone);
+      const to = addCalendarDays(thisMonday, -1, timeZone);
+      return { from, to };
     }
     case "this-month": {
-      const from = new Date(Date.UTC(y, m, 1));
-      return { from: toIsoDateUtc(from), to: toIsoDateUtc(today) };
+      const from = `${y}-${String(m).padStart(2, "0")}-01`;
+      return { from, to: today };
     }
     case "last-month": {
-      const from = new Date(Date.UTC(y, m - 1, 1));
-      const to = new Date(Date.UTC(y, m, 0));
-      return { from: toIsoDateUtc(from), to: toIsoDateUtc(to) };
+      const prev = m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 };
+      const from = `${prev.y}-${String(prev.m).padStart(2, "0")}-01`;
+      const to = addCalendarDays(
+        `${y}-${String(m).padStart(2, "0")}-01`,
+        -1,
+        timeZone,
+      );
+      return { from, to };
     }
     case "this-year": {
-      const from = new Date(Date.UTC(y, 0, 1));
-      return { from: toIsoDateUtc(from), to: toIsoDateUtc(today) };
+      const from = `${y}-01-01`;
+      return { from, to: today };
     }
     case "last-year": {
-      const from = new Date(Date.UTC(y - 1, 0, 1));
-      const to = new Date(Date.UTC(y - 1, 11, 31));
-      return { from: toIsoDateUtc(from), to: toIsoDateUtc(to) };
+      const from = `${y - 1}-01-01`;
+      const to = `${y - 1}-12-31`;
+      return { from, to };
     }
   }
 }
 
-/** Inclusive calendar range → DB bounds on `date_created` (UTC day boundaries). */
-export function dateRangeToCreatedBounds(range: {
-  from: IsoDateString | null;
-  to: IsoDateString | null;
-}): { createdGte?: Date; createdLt?: Date } {
-  const result: { createdGte?: Date; createdLt?: Date } = {};
-  if (range.from) {
-    const [y, m, d] = range.from.split("-").map(Number);
-    result.createdGte = new Date(Date.UTC(y, m - 1, d));
-  }
-  if (range.to) {
-    const [y, m, d] = range.to.split("-").map(Number);
-    result.createdLt = new Date(Date.UTC(y, m - 1, d + 1));
-  }
-  return result;
+type TimestampColumn = AnyColumn | SQL;
+
+/** Inclusive calendar range on a timestamptz column (Europe/London days). */
+export function calendarDateCreatedGte(
+  column: TimestampColumn,
+  isoDate: IsoDateString,
+) {
+  return sql`(${column} AT TIME ZONE ${APP_CALENDAR_TIMEZONE})::date >= ${isoDate}::date`;
+}
+
+export function calendarDateCreatedLte(
+  column: TimestampColumn,
+  isoDate: IsoDateString,
+) {
+  return sql`(${column} AT TIME ZONE ${APP_CALENDAR_TIMEZONE})::date <= ${isoDate}::date`;
+}
+
+export function formatCalendarDateShort(
+  iso: string,
+  timeZone = APP_CALENDAR_TIMEZONE,
+): string {
+  return new Date(iso).toLocaleDateString("en-GB", {
+    timeZone,
+    day: "numeric",
+    month: "short",
+    year: "2-digit",
+  });
 }
 
 export const DATE_PERIOD_LABELS: Record<DatePeriodPreset, string> = {

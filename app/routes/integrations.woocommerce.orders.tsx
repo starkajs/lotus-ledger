@@ -4,12 +4,15 @@ import type { Route } from "./+types/integrations.woocommerce.orders";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
 import { formatWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
+import { formatCalendarDateShort, resolveOrderDateFilters } from "~/lib/date-range-filters";
 import {
-  DATE_PERIOD_LABELS,
-  DATE_PERIOD_PRESETS,
-  resolveOrderDateFilters,
-  type DatePeriodPreset,
-} from "~/lib/date-range-filters";
+  WooCommerceOrdersFilterForm,
+  WooCommerceOrdersFilterSummary,
+} from "~/components/woocommerce-orders-filter-form";
+import {
+  wooCommerceOrdersHref,
+  type WooCommerceOrderListFilters,
+} from "~/lib/woocommerce-orders-filters";
 import {
   listDistinctWooCommerceOrderStatuses,
   listWooCommerceOrdersFromDb,
@@ -17,14 +20,6 @@ import {
 } from "~/lib/woocommerce-orders.server";
 import { syncWooCommerceOrders } from "~/lib/sync-woocommerce-orders.server";
 import { requireUser } from "~/lib/session.server";
-
-function formatDateShort(iso: string) {
-  return new Date(iso).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "2-digit",
-  });
-}
 
 function formatSyncedAt(iso: string | null) {
   if (!iso) return "Never";
@@ -34,32 +29,8 @@ function formatSyncedAt(iso: string | null) {
   }).format(new Date(iso));
 }
 
-type OrderListFilters = {
-  status: string;
-  dateFrom: string | null;
-  dateTo: string | null;
-  period: DatePeriodPreset | null;
-  lotusProductMissing: boolean;
-};
-
-function appendDateFilters(params: URLSearchParams, filters: OrderListFilters) {
-  if (filters.period) {
-    params.set("period", filters.period);
-  } else {
-    if (filters.dateFrom) params.set("from", filters.dateFrom);
-    if (filters.dateTo) params.set("to", filters.dateTo);
-  }
-}
-
-function pageHref(page: number, filters: OrderListFilters) {
-  const params = new URLSearchParams();
-  if (filters.status !== "all") params.set("status", filters.status);
-  appendDateFilters(params, filters);
-  if (filters.lotusProductMissing) params.set("lotusMissing", "yes");
-  if (page > 1) params.set("page", String(page));
-  const query = params.toString();
-  return query ? `?${query}` : "?";
-}
+const ORDERS_PATH = "/integrations/woocommerce/orders";
+const SUMMARY_PATH = "/integrations/woocommerce/orders/summary";
 
 function orderDetailHref(orderId: string, returnTo: string) {
   const params = new URLSearchParams({ returnTo });
@@ -264,13 +235,15 @@ export default function WooCommerceOrdersPage({
     lotusProductMissing,
   } = loaderData;
 
-  const listFilters: OrderListFilters = {
+  const listFilters: WooCommerceOrderListFilters = {
     status,
     dateFrom,
     dateTo,
     period,
     lotusProductMissing,
   };
+
+  const summaryHref = wooCommerceOrdersHref(SUMMARY_PATH, listFilters);
 
   const syncResult =
     actionData?.scope === "sync" && actionData.success ? actionData.result : null;
@@ -290,11 +263,19 @@ export default function WooCommerceOrdersPage({
       }
       actions={
         configured ? (
-          <Form method="post" action={postAction}>
-            <SubmitButton intent="sync" variant="pill" loadingLabel="Syncing…">
-              Sync from WooCommerce
-            </SubmitButton>
-          </Form>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              to={summaryHref}
+              className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 text-sm hover:bg-surface"
+            >
+              Sales by product
+            </Link>
+            <Form method="post" action={postAction}>
+              <SubmitButton intent="sync" variant="pill" loadingLabel="Syncing…">
+                Sync from WooCommerce
+              </SubmitButton>
+            </Form>
+          </div>
         ) : (
           <Link
             to="/integrations/woocommerce"
@@ -327,101 +308,33 @@ export default function WooCommerceOrdersPage({
             </p>
           )}
 
-          <form method="get" className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-0.5 text-xs">
-              <span className="text-ink-muted">Period</span>
-              <select
-                name="period"
-                defaultValue={period ?? ""}
-                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[10rem]"
-              >
-                <option value="">Custom range</option>
-                {DATE_PERIOD_PRESETS.map((preset) => (
-                  <option key={preset} value={preset}>
-                    {DATE_PERIOD_LABELS[preset]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-0.5 text-xs">
-              <span className="text-ink-muted">Date from</span>
-              <input
-                type="date"
-                name="from"
-                defaultValue={dateFrom ?? ""}
-                disabled={period != null}
-                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-              />
-            </label>
-            <label className="flex flex-col gap-0.5 text-xs">
-              <span className="text-ink-muted">Date to</span>
-              <input
-                type="date"
-                name="to"
-                defaultValue={dateTo ?? ""}
-                disabled={period != null}
-                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-60"
-              />
-            </label>
-            <label className="flex flex-col gap-0.5 text-xs">
-              <span className="text-ink-muted">Status</span>
-              <select
-                name="status"
-                defaultValue={status}
-                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
-              >
-                <option value="all">All</option>
-                {statuses.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-2 pb-1.5 text-xs text-ink-muted">
-              <input
-                type="checkbox"
-                name="lotusMissing"
-                value="yes"
-                defaultChecked={lotusProductMissing}
-                className="rounded border-sand-dark/60"
-              />
-              Lotus product missing
-            </label>
-            <button
-              type="submit"
-              className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1.5 text-sm hover:bg-surface"
+          <nav className="mb-3 flex gap-3 text-xs" aria-label="Orders views">
+            <span className="font-medium text-dark">Orders</span>
+            <span className="text-ink-faint" aria-hidden>
+              /
+            </span>
+            <Link
+              to={summaryHref}
+              className="text-ink-muted hover:text-teal hover:underline"
             >
-              Apply
-            </button>
-          </form>
-          {(dateFrom || dateTo || period || lotusProductMissing) && (
-            <p className="mt-2 text-xs text-ink-muted">
-              {period ? (
-                <>
-                  Showing <span className="text-dark">{DATE_PERIOD_LABELS[period]}</span>
-                  {" "}
-                  <span className="text-ink-faint">
-                    ({dateFrom} – {dateTo})
-                  </span>
-                </>
-              ) : dateFrom || dateTo ? (
-                <>
-                  Order date{" "}
-                  {dateFrom && dateTo
-                    ? `${dateFrom} – ${dateTo}`
-                    : dateFrom
-                      ? `from ${dateFrom}`
-                      : `to ${dateTo}`}
-                </>
-              ) : null}
-              {lotusProductMissing && (
-                <span className={dateFrom || dateTo || period ? " · " : ""}>
-                  No linked Lotus product on any line
-                </span>
-              )}
-            </p>
-          )}
+              Sales by product
+            </Link>
+          </nav>
+
+          <WooCommerceOrdersFilterForm
+            status={status}
+            statuses={statuses}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            period={period}
+            lotusProductMissing={lotusProductMissing}
+          />
+          <WooCommerceOrdersFilterSummary
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            period={period}
+            lotusProductMissing={lotusProductMissing}
+          />
 
           <p className="mt-3 text-xs text-ink-muted">
             {total === 0
@@ -463,7 +376,7 @@ export default function WooCommerceOrdersPage({
                       <Fragment key={order.id}>
                         <tr className="group align-top border-b border-sand-dark/30 hover:bg-sand/20">
                           <td className="px-2 py-1.5 whitespace-nowrap text-ink-muted">
-                            {formatDateShort(order.dateCreated)}
+                            {formatCalendarDateShort(order.dateCreated)}
                           </td>
                           <td className="px-2 py-1.5">
                             <div className="font-medium text-dark">
@@ -534,7 +447,7 @@ export default function WooCommerceOrdersPage({
                   <div className="flex gap-2">
                     {page > 1 ? (
                       <Link
-                        to={pageHref(page - 1, listFilters)}
+                        to={wooCommerceOrdersHref(ORDERS_PATH, listFilters, page - 1)}
                         className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1 hover:bg-surface"
                       >
                         Previous
@@ -542,7 +455,7 @@ export default function WooCommerceOrdersPage({
                     ) : null}
                     {page < totalPages ? (
                       <Link
-                        to={pageHref(page + 1, listFilters)}
+                        to={wooCommerceOrdersHref(ORDERS_PATH, listFilters, page + 1)}
                         className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1 hover:bg-surface"
                       >
                         Next
