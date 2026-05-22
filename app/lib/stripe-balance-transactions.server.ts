@@ -7,10 +7,8 @@ import {
   stripeBalanceTransactions,
   stripeConnections,
 } from "~/db/schema";
-import {
-  extractSkuFromStripeRaw,
-  type ProductMatchStatus,
-} from "./product-classification.server";
+import type { ProductMatchStatus } from "./product-classification.server";
+import { extractSkuFromStripeRaw } from "./stripe-transaction-signals";
 
 export const STRIPE_TRANSACTIONS_PAGE_SIZE = 50;
 

@@ -7,9 +7,9 @@ import { formatMoneyMinor } from "~/lib/money";
 import {
   canPushTransactionToQuickbooks,
   classifyStripeTransactionById,
-  extractStripeTransactionProductSignals,
   setStripeTransactionProductManual,
 } from "~/lib/product-classification.server";
+import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
 import { getProductMatchRuleById, listProducts } from "~/lib/products.server";
 import { getStripeBalanceTransactionById } from "~/lib/stripe-balance-transactions.server";
 import { requireUser } from "~/lib/session.server";

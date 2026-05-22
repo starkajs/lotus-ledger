@@ -6,23 +6,19 @@ import {
   stripeBalanceTransactions,
 } from "~/db/schema";
 import type { StripeBalanceTransactionRecord } from "./stripe-balance-transactions.server";
+import {
+  collectClassificationText,
+  type ClassificationText,
+} from "./stripe-transaction-signals";
+
+export type { StripeTransactionProductSignals } from "./stripe-transaction-signals";
+export {
+  collectClassificationText,
+  extractSkuFromStripeRaw,
+  extractStripeTransactionProductSignals,
+} from "./stripe-transaction-signals";
 
 export type ProductMatchStatus = "matched" | "unmatched" | "manual" | "ambiguous";
-
-export type ClassificationField =
-  | "balance_description"
-  | "charge_description"
-  | "line_item_1"
-  | "line_items_summary"
-  | "donorbox_metadata"
-  | "metadata_all"
-  | "sku"
-  | "any";
-
-export type ClassificationText = {
-  field: ClassificationField;
-  value: string;
-};
 
 export type ProductMatchRuleRecord = {
   id: string;
@@ -43,152 +39,6 @@ export type ClassifyTransactionResult = {
   productMatchRuleId: string | null;
   skippedManual?: boolean;
 };
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function metadataString(value: unknown): string | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "string") return value.trim() || null;
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Read a dedicated SKU from expanded charge metadata when Stripe adds it.
- * Does not parse line_items_summary; use sku match rules for bracket codes.
- */
-export function extractSkuFromStripeRaw(
-  stripeRaw: Record<string, unknown> | null | undefined,
-): string | null {
-  const charge = chargeFromRaw(stripeRaw ?? null);
-  if (!charge) return null;
-  const metadata = asRecord(charge.metadata);
-  if (!metadata) return null;
-  return (
-    metadataString(metadata.sku) ??
-    metadataString(metadata.SKU) ??
-    metadataString(metadata["product_sku"])
-  );
-}
-
-function chargeFromRaw(raw: Record<string, unknown> | null): Record<string, unknown> | null {
-  if (!raw) return null;
-  const source = raw.source;
-  if (!source || typeof source !== "object") return null;
-  const obj = source as { object?: string };
-  if (obj.object === "charge" || obj.object === "payment_intent") {
-    return source as Record<string, unknown>;
-  }
-  return null;
-}
-
-/** Collect labeled strings from balance txn + expanded charge metadata. */
-export function collectClassificationText(input: {
-  description?: string | null;
-  stripeRaw?: Record<string, unknown> | null;
-  sku?: string | null;
-}): ClassificationText[] {
-  const texts: ClassificationText[] = [];
-  const seen = new Set<string>();
-
-  function add(field: ClassificationField, value: string | null | undefined) {
-    const trimmed = value?.trim();
-    if (!trimmed) return;
-    const key = `${field}:${trimmed}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    texts.push({ field, value: trimmed });
-  }
-
-  add("balance_description", input.description ?? null);
-  add("sku", input.sku ?? extractSkuFromStripeRaw(input.stripeRaw));
-
-  const charge = chargeFromRaw(input.stripeRaw ?? null);
-  if (charge) {
-    add("charge_description", metadataString(charge.description));
-    const metadata = asRecord(charge.metadata);
-    if (metadata) {
-      add("line_item_1", metadataString(metadata["Line Item 1"]));
-      add("line_items_summary", metadataString(metadata["line_items_summary"]));
-      add(
-        "donorbox_metadata",
-        metadataString(metadata["donorbox_metadata"] ?? metadata["Donorbox Metadata"]),
-      );
-      for (const value of Object.values(metadata)) {
-        add("metadata_all", metadataString(value));
-      }
-    }
-  }
-
-  const skuTexts = texts
-    .filter((t) => t.field === "line_items_summary" || t.field === "line_item_1")
-    .map((t) => t.value);
-  for (const sku of skuTexts) {
-    add("sku", sku);
-  }
-
-  return texts;
-}
-
-/** Text fields from Stripe used for product classification (detail page). */
-export type StripeTransactionProductSignals = {
-  /** Charge description if expanded, otherwise balance transaction description. */
-  description: string | null;
-  balanceDescription: string | null;
-  chargeDescription: string | null;
-  lineItem1: string | null;
-  lineItemsSummary: string | null;
-  sku: string | null;
-};
-
-export function extractStripeTransactionProductSignals(input: {
-  stripeRaw?: Record<string, unknown> | null;
-  description?: string | null;
-  sku?: string | null;
-}): StripeTransactionProductSignals {
-  const raw = input.stripeRaw ?? null;
-  const balanceFromRaw =
-    raw && typeof raw.description === "string" ? raw.description.trim() : null;
-  const balanceDescription =
-    balanceFromRaw || input.description?.trim() || null;
-
-  const charge = chargeFromRaw(raw);
-  const chargeDescription = charge
-    ? metadataString(charge.description)
-    : null;
-
-  let lineItem1: string | null = null;
-  let lineItemsSummary: string | null = null;
-  if (charge) {
-    const metadata = asRecord(charge.metadata);
-    if (metadata) {
-      lineItem1 = metadataString(metadata["Line Item 1"]);
-      lineItemsSummary = metadataString(metadata["line_items_summary"]);
-    }
-  }
-
-  const description = chargeDescription ?? balanceDescription;
-  const sku = input.sku?.trim() || extractSkuFromStripeRaw(raw);
-
-  return {
-    description,
-    balanceDescription,
-    chargeDescription,
-    lineItem1,
-    lineItemsSummary,
-    sku,
-  };
-}
 
 function textsForField(
   field: string,

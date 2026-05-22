@@ -11,11 +11,9 @@ import {
 } from "~/lib/stripe-balance-transactions.server";
 import { requireUser } from "~/lib/session.server";
 import { listStripeConnections } from "~/lib/stripe-connections.server";
-import {
-  classifyAllStripeTransactions,
-  extractStripeTransactionProductSignals,
-  type ProductMatchStatus,
-} from "~/lib/product-classification.server";
+import { classifyAllStripeTransactions } from "~/lib/product-classification.server";
+import type { ProductMatchStatus } from "~/lib/product-classification.server";
+import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
 import { syncStripeBalanceTransactions } from "~/lib/sync-stripe-transactions.server";
 
 function formatDateShort(iso: string) {
