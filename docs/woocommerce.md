@@ -31,7 +31,9 @@ Full product catalog (all statuses). Stores name, SKU, slug, prices, stock, cate
 npm run sync:woocommerce-products
 ```
 
-UI: `/integrations/woocommerce/products` — search, status filter, sync button.
+UI: `/integrations/woocommerce/products` — search, status filter, sync button, **Lotus product** column.
+
+Each row links to `/integrations/woocommerce/products/:id` where you can assign (or clear) a link to one **Lotus product** from the catalog (`products` table). Sync does not change manual links.
 
 ## Hub
 

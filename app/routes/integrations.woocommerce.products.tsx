@@ -10,10 +10,21 @@ import {
 } from "~/lib/woocommerce-products.server";
 import { requireUser } from "~/lib/session.server";
 
-function pageHref(page: number, q: string, status: string) {
+function productDetailHref(productId: string, returnTo: string) {
+  const params = new URLSearchParams({ returnTo });
+  return `/integrations/woocommerce/products/${productId}?${params}`;
+}
+
+function pageHref(
+  page: number,
+  q: string,
+  status: string,
+  mappedOnly: boolean,
+) {
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (status !== "all") params.set("status", status);
+  if (mappedOnly) params.set("mapped", "yes");
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `?${query}` : "?";
@@ -47,16 +58,22 @@ export async function loader({ request }: Route.LoaderArgs) {
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
   const q = url.searchParams.get("q")?.trim() ?? "";
   const statusRaw = url.searchParams.get("status")?.trim() ?? "all";
+  const mappedOnly = url.searchParams.get("mapped") === "yes";
 
   const [list, statuses] = await Promise.all([
-    listWooCommerceProductsFromDb({ page, q, status: statusRaw }),
+    listWooCommerceProductsFromDb({
+      page,
+      q,
+      status: statusRaw,
+      mappedOnly,
+    }),
     listDistinctWooCommerceProductStatuses(),
   ]);
 
   const status =
     statuses.includes(statusRaw) || statusRaw === "all" ? statusRaw : "all";
 
-  return { ...list, q, status, statuses };
+  return { ...list, q, status, statuses, mappedOnly };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -94,6 +111,7 @@ export default function WooCommerceProductsPage({
     q,
     status,
     statuses,
+    mappedOnly,
   } = loaderData;
 
   const syncResult =
@@ -103,6 +121,7 @@ export default function WooCommerceProductsPage({
 
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, total);
+  const listReturnTo = location.pathname + location.search;
 
   return (
     <AppPage
@@ -176,6 +195,16 @@ export default function WooCommerceProductsPage({
                 ))}
               </select>
             </label>
+            <label className="flex items-center gap-2 pb-1.5 text-xs text-ink-muted">
+              <input
+                type="checkbox"
+                name="mapped"
+                value="yes"
+                defaultChecked={mappedOnly}
+                className="rounded border-sand-dark/60"
+              />
+              Linked to Lotus product
+            </label>
             <button
               type="submit"
               className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1.5 text-sm hover:bg-surface"
@@ -186,8 +215,13 @@ export default function WooCommerceProductsPage({
 
           <p className="mt-3 text-xs text-ink-muted">
             {total === 0
-              ? "No products synced yet."
+              ? mappedOnly
+                ? "No products linked to a Lotus product."
+                : "No products synced yet."
               : `${total} product${total === 1 ? "" : "s"}`}
+            {mappedOnly && total > 0 && (
+              <span className="text-ink-faint"> · linked to Lotus only</span>
+            )}
             {total > 0 && (
               <span className="text-ink-faint">
                 {" "}
@@ -198,7 +232,9 @@ export default function WooCommerceProductsPage({
 
           {products.length === 0 ? (
             <p className="mt-6 text-sm text-ink-muted">
-              Use Sync from WooCommerce to import your catalog.
+              {mappedOnly
+                ? "Clear the filter or link products on their detail pages."
+                : "Use Sync from WooCommerce to import your catalog."}
             </p>
           ) : (
             <>
@@ -213,6 +249,10 @@ export default function WooCommerceProductsPage({
                       <th className="px-2 py-1.5 font-medium text-right">Price</th>
                       <th className="px-2 py-1.5 font-medium">Stock</th>
                       <th className="px-2 py-1.5 font-medium">Categories</th>
+                      <th className="px-2 py-1.5 font-medium">Lotus product</th>
+                      <th className="px-2 py-1.5 font-medium">
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="bg-surface-overlay">
@@ -222,7 +262,12 @@ export default function WooCommerceProductsPage({
                         className="border-b border-sand-dark/30 align-top hover:bg-sand/20"
                       >
                         <td className="px-2 py-1.5">
-                          <div className="font-medium text-dark">{product.name}</div>
+                          <Link
+                            to={productDetailHref(product.id, listReturnTo)}
+                            className="font-medium text-teal hover:underline"
+                          >
+                            {product.name}
+                          </Link>
                           {product.slug && (
                             <div className="font-mono text-[10px] text-ink-faint">
                               {product.slug}
@@ -274,6 +319,27 @@ export default function WooCommerceProductsPage({
                         <td className="px-2 py-1.5 text-ink-muted max-w-[12rem]">
                           {product.categorySummary ?? "—"}
                         </td>
+                        <td className="px-2 py-1.5">
+                          {product.lotusProduct ? (
+                            <Link
+                              to={productDetailHref(product.id, listReturnTo)}
+                              className="font-mono text-[10px] text-teal hover:underline"
+                              title={product.lotusProduct.name}
+                            >
+                              {product.lotusProduct.code}
+                            </Link>
+                          ) : (
+                            <span className="text-ink-faint">—</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          <Link
+                            to={productDetailHref(product.id, listReturnTo)}
+                            className="inline-flex rounded border border-sand-dark/50 px-2 py-0.5 text-[11px] font-medium text-teal hover:bg-surface"
+                          >
+                            Edit
+                          </Link>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -291,7 +357,7 @@ export default function WooCommerceProductsPage({
                   <div className="flex gap-2">
                     {page > 1 ? (
                       <Link
-                        to={pageHref(page - 1, q, status)}
+                        to={pageHref(page - 1, q, status, mappedOnly)}
                         className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1 hover:bg-surface"
                       >
                         Previous
@@ -299,7 +365,7 @@ export default function WooCommerceProductsPage({
                     ) : null}
                     {page < totalPages ? (
                       <Link
-                        to={pageHref(page + 1, q, status)}
+                        to={pageHref(page + 1, q, status, mappedOnly)}
                         className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1 hover:bg-surface"
                       >
                         Next

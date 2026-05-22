@@ -58,6 +58,10 @@ export default [
       "integrations/woocommerce/products",
       "routes/integrations.woocommerce.products.tsx",
     ),
+    route(
+      "integrations/woocommerce/products/:productId",
+      "routes/integrations.woocommerce.products.$productId.tsx",
+    ),
   ]),
   route("integrations/quickbooks/connect", "routes/integrations.quickbooks.connect.tsx"),
   route("integrations/quickbooks/callback", "routes/integrations.quickbooks.callback.tsx"),

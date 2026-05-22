@@ -11,11 +11,11 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "Lotus Ledger — Analytics integration platform" },
+    { title: "Lotus Ledger — Jamyang Buddhist Centre finance reconciliation" },
     {
       name: "description",
       content:
-        "Connect Stripe, QuickBooks, and WooCommerce for unified financial and commerce analytics.",
+        "Lotus Ledger connects WooCommerce, Stripe, and QuickBooks for finance reconciliation at Jamyang Buddhist Centre.",
     },
   ];
 }

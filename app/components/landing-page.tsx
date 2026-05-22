@@ -2,6 +2,8 @@ import { Link } from "react-router";
 import { useCookieConsent } from "./cookie-consent-provider";
 import { SiteFooter } from "./site-footer";
 
+const HERO_IMAGE = "/lotusledger-hero.svg";
+
 const integrations = [
   {
     name: "Stripe",
@@ -58,7 +60,7 @@ export function LandingPage() {
 
   return (
     <div className="flex min-h-screen flex-col pb-24">
-      <header className="border-b border-sand-dark/40 bg-surface-overlay/80 backdrop-blur-sm sticky top-0 z-10">
+      <header className="sticky top-0 z-10 border-b border-sand-dark/40 bg-surface-overlay/80 backdrop-blur-sm">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
           <a href="/" className="flex items-center gap-2.5">
             <span
@@ -79,19 +81,29 @@ export function LandingPage() {
       </header>
 
       <main className="flex-1">
-        <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-24">
-          <div className="max-w-2xl">
-            <p className="mb-4 text-sm font-medium uppercase tracking-wider text-teal">
-              Analytics integration platform
+        <section className="border-b border-sand-dark/30 bg-gradient-to-b from-surface-overlay via-sand/15 to-surface">
+          <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
+            <img
+              src={HERO_IMAGE}
+              alt="Lotus Ledger — Jamyang Buddhist Centre finance reconciliation. A lotus connects WooCommerce, Stripe, and QuickBooks."
+              width={1200}
+              height={600}
+              fetchPriority="high"
+              decoding="async"
+              className="mx-auto h-auto w-full max-w-5xl rounded-jamyang-lg border border-sand-dark/40 shadow-sm"
+            />
+            <p className="mx-auto mt-8 max-w-2xl text-center text-lg leading-relaxed text-ink-muted">
+              Reconcile payments, accounting, and shop sales in one place—without
+              manual exports or spreadsheet wrangling.
             </p>
-            <h1 className="text-4xl leading-tight sm:text-5xl">
-              One place for your financial and commerce data
-            </h1>
-            <p className="mt-6 text-lg leading-relaxed text-ink-muted">
-              Lotus Ledger connects Stripe, QuickBooks, and WooCommerce so you
-              can understand income, spending, and online sales without manual
-              exports or spreadsheet wrangling.
-            </p>
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              <Link
+                to="/login"
+                className="rounded-jamyang-pill bg-maroon px-6 py-2.5 text-sm font-medium text-surface-overlay transition-colors hover:bg-maroon-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-maroon"
+              >
+                Log in
+              </Link>
+            </div>
           </div>
         </section>
 

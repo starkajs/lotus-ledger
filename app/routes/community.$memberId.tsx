@@ -2,7 +2,10 @@ import { Fragment, type ReactNode } from "react";
 import { Link } from "react-router";
 import type { Route } from "./+types/community.$memberId";
 import { AppPage } from "~/components/app-page";
-import { getCommunityMemberById } from "~/lib/community-members.server";
+import {
+  getCommunityMemberById,
+  type CommunityMemberStripeLink,
+} from "~/lib/community-members.server";
 import { formatCountryName } from "~/lib/country-code";
 import { formatMoneyMinor } from "~/lib/money";
 import { requireUser } from "~/lib/session.server";
@@ -21,7 +24,7 @@ import {
   type WooCommerceOrderRecord,
 } from "~/lib/woocommerce-orders.server";
 
-type MemberTab = "stripe" | "woocommerce";
+type MemberTab = "stripe" | "stripe-customers" | "woocommerce";
 
 function formatDate(iso: string | null) {
   if (!iso) return "—";
@@ -62,6 +65,7 @@ function memberHref(
 ) {
   const params = new URLSearchParams({ returnTo: options.returnTo });
   if (options.tab === "woocommerce") params.set("tab", "woocommerce");
+  else if (options.tab === "stripe-customers") params.set("tab", "stripe-customers");
   if (options.page && options.page > 1) params.set("page", String(options.page));
   const query = params.toString();
   return `/community/${memberId}?${query}`;
@@ -148,6 +152,48 @@ function Pagination({
         )}
       </div>
     </nav>
+  );
+}
+
+function StripeCustomersPanel({
+  stripeLinks,
+  connectionLabels,
+}: {
+  stripeLinks: CommunityMemberStripeLink[];
+  connectionLabels: Record<string, string>;
+}) {
+  return (
+    <>
+      <p className="text-xs text-ink-muted">
+        {stripeLinks.length === 0
+          ? "No Stripe customer links for this member."
+          : `${stripeLinks.length} Stripe customer${stripeLinks.length === 1 ? "" : "s"} linked`}
+      </p>
+
+      {stripeLinks.length === 0 ? (
+        <p className="mt-4 text-sm text-ink-muted">
+          Links are created when Stripe customers or synced transactions match this
+          member&apos;s email.
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-2 rounded-jamyang border border-sand-dark/50 bg-surface px-4 py-3 text-sm">
+          {stripeLinks.map((link) => (
+            <li key={link.id} className="font-mono text-xs">
+              <span className="text-dark">
+                {connectionLabels[link.stripeConnectionId] ?? "Stripe account"}
+              </span>
+              <span className="text-ink-muted"> · {link.stripeCustomerId}</span>
+              {link.stripeCustomerCreatedAt && (
+                <span className="text-ink-faint">
+                  {" "}
+                  · customer since {formatDate(link.stripeCustomerCreatedAt)}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
 
@@ -431,8 +477,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   await requireUser(request);
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/community";
+  const tabParam = url.searchParams.get("tab");
   const tab: MemberTab =
-    url.searchParams.get("tab") === "woocommerce" ? "woocommerce" : "stripe";
+    tabParam === "woocommerce"
+      ? "woocommerce"
+      : tabParam === "stripe-customers"
+        ? "stripe-customers"
+        : "stripe";
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
 
   const member = await getCommunityMemberById(params.memberId);
@@ -554,33 +605,6 @@ export default function CommunityMemberPage({ loaderData }: Route.ComponentProps
       </div>
 
       <section className="mt-8">
-        <h2 className="text-lg font-medium text-dark">Stripe customers</h2>
-        {member.stripeLinks.length === 0 ? (
-          <p className="mt-2 text-sm text-ink-muted">
-            No Stripe customer links yet.
-          </p>
-        ) : (
-          <ul className="mt-3 space-y-2 rounded-jamyang border border-sand-dark/50 bg-surface-overlay px-4 py-3 text-sm">
-            {member.stripeLinks.map((link) => (
-              <li key={link.id} className="font-mono text-xs">
-                <span className="text-dark">
-                  {connectionLabels[link.stripeConnectionId] ?? "Stripe account"}
-                </span>
-                <span className="text-ink-muted"> · {link.stripeCustomerId}</span>
-                {link.stripeCustomerCreatedAt && (
-                  <span className="text-ink-faint">
-                    {" "}
-                    · customer since{" "}
-                    {formatDate(link.stripeCustomerCreatedAt)}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="mt-8">
         <nav
           className="flex flex-wrap gap-1 border-b border-sand-dark/50"
           aria-label="Member activity"
@@ -591,6 +615,13 @@ export default function CommunityMemberPage({ loaderData }: Route.ComponentProps
             aria-current={tab === "stripe" ? "page" : undefined}
           >
             Stripe transactions ({stripeCount})
+          </Link>
+          <Link
+            to={memberHref(member.id, { tab: "stripe-customers", returnTo })}
+            className={tabClass(tab === "stripe-customers")}
+            aria-current={tab === "stripe-customers" ? "page" : undefined}
+          >
+            Stripe customers ({member.stripeLinks.length})
           </Link>
           <Link
             to={memberHref(member.id, { tab: "woocommerce", returnTo })}
@@ -613,6 +644,11 @@ export default function CommunityMemberPage({ loaderData }: Route.ComponentProps
               memberId={member.id}
               returnTo={returnTo}
               memberReturnTo={memberReturnTo}
+            />
+          ) : tab === "stripe-customers" ? (
+            <StripeCustomersPanel
+              stripeLinks={member.stripeLinks}
+              connectionLabels={connectionLabels}
             />
           ) : (
             <WooCommerceOrdersPanel

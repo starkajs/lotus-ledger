@@ -401,6 +401,10 @@ export const woocommerceProducts = pgTable(
     stockStatus: text("stock_status"),
     stockQuantity: integer("stock_quantity"),
     categorySummary: text("category_summary"),
+    /** Lotus Ledger product catalog link (manual assignment). */
+    productId: uuid("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
     wcRaw: jsonb("wc_raw").$type<Record<string, unknown>>(),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

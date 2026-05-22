@@ -1,6 +1,6 @@
-import { and, asc, count, eq, ilike, max, or } from "drizzle-orm";
+import { and, asc, count, eq, ilike, isNotNull, max, or } from "drizzle-orm";
 import { getDb } from "~/db";
-import { woocommerceProducts } from "~/db/schema";
+import { products, woocommerceProducts } from "~/db/schema";
 import { getWooCommerceStoreCurrency } from "~/lib/env.server";
 import type { WooCommerceProduct } from "~/lib/woocommerce-api.server";
 import { parseWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
@@ -22,6 +22,12 @@ function buildCategorySummary(
   return names.length > 0 ? names.join(", ") : null;
 }
 
+export type WooCommerceProductLotusLink = {
+  productId: string;
+  code: string;
+  name: string;
+};
+
 export type WooCommerceProductRecord = {
   id: string;
   wcProductId: number;
@@ -42,9 +48,14 @@ export type WooCommerceProductRecord = {
   stockStatus: string | null;
   stockQuantity: number | null;
   categorySummary: string | null;
+  lotusProduct: WooCommerceProductLotusLink | null;
   syncedAt: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WooCommerceProductDetail = WooCommerceProductRecord & {
+  wcRaw: Record<string, unknown> | null;
 };
 
 export function mapWooCommerceProduct(
@@ -81,34 +92,61 @@ export function mapWooCommerceProduct(
   };
 }
 
-function rowToRecord(
-  row: typeof woocommerceProducts.$inferSelect,
-): WooCommerceProductRecord {
+function lotusLinkFromRow(row: {
+  productId: string | null;
+  lotusProductCode: string | null;
+  lotusProductName: string | null;
+}): WooCommerceProductLotusLink | null {
+  if (!row.productId || !row.lotusProductCode) return null;
   return {
-    id: row.id,
-    wcProductId: row.wcProductId,
-    name: row.name,
-    slug: row.slug,
-    sku: row.sku,
-    status: row.status,
-    type: row.type,
-    catalogVisibility: row.catalogVisibility,
-    permalink: row.permalink,
-    shortDescription: row.shortDescription,
-    description: row.description,
-    currency: row.currency,
-    priceMinor: row.priceMinor,
-    regularPriceMinor: row.regularPriceMinor,
-    salePriceMinor: row.salePriceMinor,
-    onSale: row.onSale,
-    stockStatus: row.stockStatus,
-    stockQuantity: row.stockQuantity,
-    categorySummary: row.categorySummary,
-    syncedAt: row.syncedAt.toISOString(),
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
+    productId: row.productId,
+    code: row.lotusProductCode,
+    name: row.lotusProductName ?? row.lotusProductCode,
   };
 }
+
+function rowToRecord(row: {
+  product: typeof woocommerceProducts.$inferSelect;
+  lotusProductCode: string | null;
+  lotusProductName: string | null;
+}): WooCommerceProductRecord {
+  const p = row.product;
+  return {
+    id: p.id,
+    wcProductId: p.wcProductId,
+    name: p.name,
+    slug: p.slug,
+    sku: p.sku,
+    status: p.status,
+    type: p.type,
+    catalogVisibility: p.catalogVisibility,
+    permalink: p.permalink,
+    shortDescription: p.shortDescription,
+    description: p.description,
+    currency: p.currency,
+    priceMinor: p.priceMinor,
+    regularPriceMinor: p.regularPriceMinor,
+    salePriceMinor: p.salePriceMinor,
+    onSale: p.onSale,
+    stockStatus: p.stockStatus,
+    stockQuantity: p.stockQuantity,
+    categorySummary: p.categorySummary,
+    lotusProduct: lotusLinkFromRow({
+      productId: p.productId,
+      lotusProductCode: row.lotusProductCode,
+      lotusProductName: row.lotusProductName,
+    }),
+    syncedAt: p.syncedAt.toISOString(),
+    createdAt: p.createdAt.toISOString(),
+    updatedAt: p.updatedAt.toISOString(),
+  };
+}
+
+const productListSelect = {
+  product: woocommerceProducts,
+  lotusProductCode: products.code,
+  lotusProductName: products.name,
+};
 
 export async function upsertWooCommerceProduct(
   input: Omit<
@@ -146,6 +184,8 @@ export async function upsertWooCommerceProduct(
 export type ListWooCommerceProductsDbOptions = {
   q?: string;
   status?: string;
+  /** When true, only products linked to a Lotus catalog product. */
+  mappedOnly?: boolean;
   page?: number;
   pageSize?: number;
 };
@@ -185,10 +225,19 @@ export async function listWooCommerceProductsFromDb(
       ? eq(woocommerceProducts.status, options.status)
       : undefined;
 
+  const mappedFilter = options.mappedOnly
+    ? isNotNull(woocommerceProducts.productId)
+    : undefined;
+
+  const filters = [search, statusFilter, mappedFilter].filter(
+    (f): f is NonNullable<typeof f> => f != null,
+  );
   const whereClause =
-    search && statusFilter
-      ? and(search, statusFilter)
-      : search ?? statusFilter;
+    filters.length === 0
+      ? undefined
+      : filters.length === 1
+        ? filters[0]
+        : and(...filters);
 
   const [{ value: total }] = await db
     .select({ value: count() })
@@ -200,8 +249,9 @@ export async function listWooCommerceProductsFromDb(
   const offset = (safePage - 1) * pageSize;
 
   const rows = await db
-    .select()
+    .select(productListSelect)
     .from(woocommerceProducts)
+    .leftJoin(products, eq(woocommerceProducts.productId, products.id))
     .where(whereClause)
     .orderBy(asc(woocommerceProducts.name))
     .limit(pageSize)
@@ -236,6 +286,52 @@ export async function countWooCommerceProducts(): Promise<number> {
   const db = getDb();
   const [{ value }] = await db.select({ value: count() }).from(woocommerceProducts);
   return value;
+}
+
+export async function getWooCommerceProductById(
+  id: string,
+): Promise<WooCommerceProductDetail | null> {
+  const db = getDb();
+  const [row] = await db
+    .select(productListSelect)
+    .from(woocommerceProducts)
+    .leftJoin(products, eq(woocommerceProducts.productId, products.id))
+    .where(eq(woocommerceProducts.id, id))
+    .limit(1);
+
+  if (!row) return null;
+
+  const record = rowToRecord(row);
+  return {
+    ...record,
+    wcRaw: row.product.wcRaw,
+  };
+}
+
+export async function setWooCommerceProductLotusLink(
+  woocommerceProductId: string,
+  productId: string | null,
+): Promise<WooCommerceProductDetail | null> {
+  const db = getDb();
+  const now = new Date();
+
+  if (productId) {
+    const [catalogProduct] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(eq(products.id, productId))
+      .limit(1);
+    if (!catalogProduct) {
+      throw new Error("Lotus product not found");
+    }
+  }
+
+  await db
+    .update(woocommerceProducts)
+    .set({ productId, updatedAt: now })
+    .where(eq(woocommerceProducts.id, woocommerceProductId));
+
+  return getWooCommerceProductById(woocommerceProductId);
 }
 
 export async function syncWooCommerceProductsFromApi(): Promise<{

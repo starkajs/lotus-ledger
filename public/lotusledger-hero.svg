@@ -1,0 +1,61 @@
+<svg viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg" font-family="Georgia, 'Times New Roman', serif" role="img" aria-label="LotusLedger — Jamyang Buddhist Centre finance reconciliation">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fbf7ef"/>
+      <stop offset="100%" stop-color="#f3ece0"/>
+    </linearGradient>
+    <linearGradient id="petalA" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5d6b8"/>
+      <stop offset="100%" stop-color="#e8a86d"/>
+    </linearGradient>
+    <linearGradient id="petalB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f8e2cc"/>
+      <stop offset="100%" stop-color="#edbd8e"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c79a4b"/>
+      <stop offset="100%" stop-color="#9c7430"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="600" fill="url(#bg)"/>
+
+  <!-- subtle reconciliation flow line connecting three system nodes -->
+  <path d="M 250 470 C 450 420, 750 420, 950 470" fill="none" stroke="#d8c39a" stroke-width="2" stroke-dasharray="2 7" stroke-linecap="round"/>
+  <g font-size="15" fill="#8a7a5c" text-anchor="middle" letter-spacing="1">
+    <circle cx="250" cy="470" r="6" fill="url(#gold)"/>
+    <text x="250" y="502">WooCommerce</text>
+    <circle cx="600" cy="430" r="6" fill="url(#gold)"/>
+    <text x="600" y="462">Stripe</text>
+    <circle cx="950" cy="470" r="6" fill="url(#gold)"/>
+    <text x="950" y="502">QuickBooks</text>
+  </g>
+
+  <!-- lotus -->
+  <g transform="translate(600 250)">
+    <!-- back petals -->
+    <g fill="url(#petalB)" stroke="#dca874" stroke-width="1.5">
+      <path d="M0 40 C -70 -10, -78 -90, 0 -130 C 78 -90, 70 -10, 0 40 Z" transform="rotate(-48)"/>
+      <path d="M0 40 C -70 -10, -78 -90, 0 -130 C 78 -90, 70 -10, 0 40 Z" transform="rotate(48)"/>
+      <path d="M0 40 C -55 0, -60 -70, 0 -105 C 60 -70, 55 0, 0 40 Z" transform="rotate(-90)"/>
+      <path d="M0 40 C -55 0, -60 -70, 0 -105 C 60 -70, 55 0, 0 40 Z" transform="rotate(90)"/>
+    </g>
+    <!-- mid petals -->
+    <g fill="url(#petalA)" stroke="#d18f52" stroke-width="1.5">
+      <path d="M0 40 C -60 -5, -66 -95, 0 -135 C 66 -95, 60 -5, 0 40 Z" transform="rotate(-24)"/>
+      <path d="M0 40 C -60 -5, -66 -95, 0 -135 C 66 -95, 60 -5, 0 40 Z" transform="rotate(24)"/>
+    </g>
+    <!-- front centre petal -->
+    <path d="M0 45 C -55 0, -58 -100, 0 -145 C 58 -100, 55 0, 0 45 Z" fill="url(#petalA)" stroke="#c8823f" stroke-width="1.5"/>
+    <!-- centre -->
+    <circle cx="0" cy="-12" r="10" fill="url(#gold)"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="600" y="120" text-anchor="middle" font-size="58" fill="#3c3320" letter-spacing="3">Lotus<tspan fill="#b88a3e">Ledger</tspan></text>
+  <text x="600" y="152" text-anchor="middle" font-size="16" fill="#9a8a6a" letter-spacing="5">JAMYANG BUDDHIST CENTRE &#183; FINANCE RECONCILIATION</text>
+
+  <!-- sourced inscription -->
+  <text x="600" y="540" text-anchor="middle" font-size="22" fill="#5a4e36" font-style="italic">&#8220;Righteous wealth righteously gained&#8221;</text>
+  <text x="600" y="568" text-anchor="middle" font-size="14" fill="#9a8a6a" letter-spacing="1">&#8212; The Buddha, &#256;diya Sutta (A&#7749;guttara Nik&#257;ya 5.41)</text>
+</svg>
