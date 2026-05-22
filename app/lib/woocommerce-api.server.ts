@@ -73,7 +73,6 @@ function authHeader(consumerKey: string, consumerSecret: string): string {
 export async function listWooCommerceOrders(
   options: ListWooCommerceOrdersOptions = {},
 ): Promise<ListWooCommerceOrdersResult> {
-  const { siteUrl, consumerKey, consumerSecret } = requireWooCommerceConfig();
   const page = Math.max(1, options.page ?? 1);
   const perPage = Math.min(100, Math.max(1, options.perPage ?? 100));
 
@@ -86,26 +85,12 @@ export async function listWooCommerceOrders(
   if (options.after) params.set("after", options.after);
   if (options.status) params.set("status", options.status);
 
-  const url = `${siteUrl}/wp-json/wc/v3/orders?${params}`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: authHeader(consumerKey, consumerSecret),
-      Accept: "application/json",
-    },
-  });
+  const { data, totalPages, total } = await wooCommerceFetch<WooCommerceOrder[]>(
+    "orders",
+    params,
+  );
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(
-      `WooCommerce API error ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`,
-    );
-  }
-
-  const orders = (await res.json()) as WooCommerceOrder[];
-  const totalPages = Number(res.headers.get("x-wp-totalpages") ?? "1") || 1;
-  const total = Number(res.headers.get("x-wp-total") ?? String(orders.length)) || 0;
-
-  return { orders, page, totalPages, total };
+  return { orders: data, page, totalPages, total };
 }
 
 export async function* iterateWooCommerceOrders(options: {
@@ -129,6 +114,113 @@ export async function* iterateWooCommerceOrders(options: {
   }
 }
 
+export type WooCommerceProduct = {
+  id: number;
+  name: string;
+  slug?: string;
+  permalink?: string;
+  date_created?: string;
+  date_modified?: string;
+  type: string;
+  status: string;
+  featured?: boolean;
+  catalog_visibility?: string;
+  description?: string;
+  short_description?: string;
+  sku?: string;
+  price?: string;
+  regular_price?: string;
+  sale_price?: string;
+  on_sale?: boolean;
+  stock_quantity?: number | null;
+  stock_status?: string;
+  categories?: Array<{ id?: number; name?: string; slug?: string }>;
+  images?: Array<{ id?: number; src?: string; name?: string }>;
+  [key: string]: unknown;
+};
+
+export type ListWooCommerceProductsOptions = {
+  page?: number;
+  perPage?: number;
+  status?: string;
+};
+
+export type ListWooCommerceProductsResult = {
+  products: WooCommerceProduct[];
+  page: number;
+  totalPages: number;
+  total: number;
+};
+
+async function wooCommerceFetch<T>(path: string, params?: URLSearchParams): Promise<{
+  data: T;
+  totalPages: number;
+  total: number;
+}> {
+  const { siteUrl, consumerKey, consumerSecret } = requireWooCommerceConfig();
+  const query = params?.toString();
+  const url = `${siteUrl}/wp-json/wc/v3/${path}${query ? `?${query}` : ""}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: authHeader(consumerKey, consumerSecret),
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `WooCommerce API error ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`,
+    );
+  }
+
+  const data = (await res.json()) as T;
+  const totalPages = Number(res.headers.get("x-wp-totalpages") ?? "1") || 1;
+  const total = Number(res.headers.get("x-wp-total") ?? "0") || 0;
+  return { data, totalPages, total };
+}
+
+export async function listWooCommerceProducts(
+  options: ListWooCommerceProductsOptions = {},
+): Promise<ListWooCommerceProductsResult> {
+  const page = Math.max(1, options.page ?? 1);
+  const perPage = Math.min(100, Math.max(1, options.perPage ?? 100));
+
+  const params = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage),
+    orderby: "title",
+    order: "asc",
+  });
+  if (options.status) params.set("status", options.status);
+
+  const { data, totalPages, total } = await wooCommerceFetch<WooCommerceProduct[]>(
+    "products",
+    params,
+  );
+
+  return { products: data, page, totalPages, total };
+}
+
+export async function* iterateWooCommerceProducts(options?: {
+  perPage?: number;
+  status?: string;
+}): AsyncGenerator<WooCommerceProduct> {
+  let page = 1;
+  for (;;) {
+    const result = await listWooCommerceProducts({
+      page,
+      perPage: options?.perPage ?? 100,
+      status: options?.status ?? "any",
+    });
+    for (const product of result.products) {
+      yield product;
+    }
+    if (page >= result.totalPages || result.products.length === 0) break;
+    page += 1;
+  }
+}
+
 export async function verifyWooCommerceConnection(): Promise<{
   ok: boolean;
   siteUrl?: string;
@@ -136,7 +228,7 @@ export async function verifyWooCommerceConnection(): Promise<{
 }> {
   try {
     const { siteUrl } = requireWooCommerceConfig();
-    await listWooCommerceOrders({ perPage: 1, page: 1 });
+    await listWooCommerceProducts({ perPage: 1, page: 1 });
     return { ok: true, siteUrl, error: undefined };
   } catch (err) {
     return {

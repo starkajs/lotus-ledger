@@ -16,8 +16,11 @@ const INTENT_MESSAGES: Record<string, string> = {
 
 function messageForIntent(intent: string, pathname: string): string {
   if (intent === "sync") {
+    if (pathname.includes("/integrations/woocommerce/products")) {
+      return "Syncing WooCommerce products…";
+    }
     if (pathname.includes("/integrations/woocommerce")) {
-      return "Syncing from WooCommerce…";
+      return "Syncing WooCommerce orders…";
     }
     if (pathname.includes("/community")) {
       return "Syncing community from Stripe…";

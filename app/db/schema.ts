@@ -377,3 +377,34 @@ export type WooCommerceOrderLineItem = {
   subtotalMinor: number | null;
   totalMinor: number | null;
 };
+
+/** WooCommerce product synced from WC REST API. */
+export const woocommerceProducts = pgTable(
+  "woocommerce_products",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    wcProductId: integer("wc_product_id").notNull(),
+    name: text().notNull(),
+    slug: text(),
+    sku: text(),
+    status: text().notNull(),
+    type: text().notNull(),
+    catalogVisibility: text("catalog_visibility"),
+    permalink: text(),
+    shortDescription: text("short_description"),
+    description: text(),
+    currency: text().notNull(),
+    priceMinor: integer("price_minor"),
+    regularPriceMinor: integer("regular_price_minor"),
+    salePriceMinor: integer("sale_price_minor"),
+    onSale: boolean("on_sale").notNull().default(false),
+    stockStatus: text("stock_status"),
+    stockQuantity: integer("stock_quantity"),
+    categorySummary: text("category_summary"),
+    wcRaw: jsonb("wc_raw").$type<Record<string, unknown>>(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [unique("woocommerce_products_wc_product_id_unique").on(table.wcProductId)],
+);

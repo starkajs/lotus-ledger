@@ -3,6 +3,7 @@ import type { Route } from "./+types/integrations.woocommerce";
 import { AppPage } from "~/components/app-page";
 import { getWooCommerceSiteUrl, isWooCommerceConfigured } from "~/lib/env.server";
 import { countWooCommerceOrders } from "~/lib/woocommerce-orders.server";
+import { countWooCommerceProducts } from "~/lib/woocommerce-products.server";
 import { verifyWooCommerceConnection } from "~/lib/woocommerce-api.server";
 import { requireUser } from "~/lib/session.server";
 
@@ -19,6 +20,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const siteUrl = getWooCommerceSiteUrl() ?? null;
   const verify = configured ? await verifyWooCommerceConnection() : { ok: false };
   const orderCount = configured ? await countWooCommerceOrders() : 0;
+  const productCount = configured ? await countWooCommerceProducts() : 0;
 
   return {
     configured,
@@ -26,18 +28,20 @@ export async function loader({ request }: Route.LoaderArgs) {
     verifyOk: verify.ok,
     verifyError: verify.error ?? null,
     orderCount,
+    productCount,
   };
 }
 
 export default function WooCommerceIntegrationPage({
   loaderData,
 }: Route.ComponentProps) {
-  const { configured, siteUrl, verifyOk, verifyError, orderCount } = loaderData;
+  const { configured, siteUrl, verifyOk, verifyError, orderCount, productCount } =
+    loaderData;
 
   return (
     <AppPage
       title="WooCommerce"
-      description="Orders from your WordPress shop via the WooCommerce REST API."
+      description="Orders and products from your WordPress shop via the WooCommerce REST API."
     >
       {!configured ? (
         <div
@@ -81,6 +85,10 @@ export default function WooCommerceIntegrationPage({
               Orders in Lotus Ledger:{" "}
               <span className="font-medium text-dark">{orderCount}</span>
             </p>
+            <p className="mt-2 text-ink-muted">
+              Products in Lotus Ledger:{" "}
+              <span className="font-medium text-dark">{productCount}</span>
+            </p>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-3">
@@ -90,12 +98,19 @@ export default function WooCommerceIntegrationPage({
             >
               View orders
             </Link>
+            <Link
+              to="/integrations/woocommerce/products"
+              className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 text-sm font-medium text-dark hover:bg-surface"
+            >
+              View products
+            </Link>
           </div>
 
           <p className="mt-6 text-xs text-ink-muted">
-            Sync from the orders page or run{" "}
-            <code className="font-mono">npm run sync:woocommerce-orders</code>.
-            Billing email is matched to community members (created if missing).
+            Sync from each list page or run{" "}
+            <code className="font-mono">npm run sync:woocommerce-orders</code> /{" "}
+            <code className="font-mono">sync:woocommerce-products</code>. Order
+            billing email finds or creates a community member automatically.
           </p>
         </>
       )}

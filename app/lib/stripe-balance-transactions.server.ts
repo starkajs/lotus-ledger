@@ -480,6 +480,17 @@ export type ListStripeBalanceTransactionsForMemberOptions = {
   pageSize?: number;
 };
 
+export async function countStripeBalanceTransactionsForMember(
+  communityMemberId: string,
+): Promise<number> {
+  const db = getDb();
+  const [{ value }] = await db
+    .select({ value: count() })
+    .from(stripeBalanceTransactions)
+    .where(eq(stripeBalanceTransactions.communityMemberId, communityMemberId));
+  return value;
+}
+
 export async function listStripeBalanceTransactionsForMember(
   options: ListStripeBalanceTransactionsForMemberOptions,
 ): Promise<ListStripeBalanceTransactionsForMemberResult> {

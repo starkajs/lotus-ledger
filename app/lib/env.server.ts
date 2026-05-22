@@ -110,6 +110,12 @@ export function isWooCommerceConfigured(): boolean {
   );
 }
 
+/** Store currency for WooCommerce product prices (ISO code, lowercase). */
+export function getWooCommerceStoreCurrency(): string {
+  const raw = process.env.WC_STORE_CURRENCY?.trim().toLowerCase();
+  return raw || "gbp";
+}
+
 export function requireWooCommerceConfig(): {
   siteUrl: string;
   consumerKey: string;

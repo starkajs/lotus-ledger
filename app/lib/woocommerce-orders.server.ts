@@ -408,3 +408,58 @@ export async function countWooCommerceOrders(): Promise<number> {
   const [{ value }] = await db.select({ value: count() }).from(woocommerceOrders);
   return value;
 }
+
+export async function countWooCommerceOrdersForMember(
+  communityMemberId: string,
+): Promise<number> {
+  const db = getDb();
+  const [{ value }] = await db
+    .select({ value: count() })
+    .from(woocommerceOrders)
+    .where(eq(woocommerceOrders.communityMemberId, communityMemberId));
+  return value;
+}
+
+export type ListWooCommerceOrdersForMemberResult = {
+  orders: WooCommerceOrderRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
+export async function listWooCommerceOrdersForMember(options: {
+  communityMemberId: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<ListWooCommerceOrdersForMemberResult> {
+  const pageSize = options.pageSize ?? WOOCOMMERCE_ORDERS_PAGE_SIZE;
+  const page = Math.max(1, options.page ?? 1);
+  const where = eq(woocommerceOrders.communityMemberId, options.communityMemberId);
+  const db = getDb();
+
+  const [{ value: total }] = await db
+    .select({ value: count() })
+    .from(woocommerceOrders)
+    .where(where);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const offset = (safePage - 1) * pageSize;
+
+  const rows = await db
+    .select()
+    .from(woocommerceOrders)
+    .where(where)
+    .orderBy(desc(woocommerceOrders.dateCreated))
+    .limit(pageSize)
+    .offset(offset);
+
+  return {
+    orders: rows.map((row) => rowToRecord(row)),
+    total,
+    page: safePage,
+    pageSize,
+    totalPages,
+  };
+}

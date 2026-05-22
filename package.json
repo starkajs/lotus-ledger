@@ -20,6 +20,7 @@
     "backfill:stripe-payment-intents": "npx tsx scripts/backfill-stripe-payment-intents.ts",
     "backfill:stripe-community-links": "npx tsx scripts/backfill-stripe-community-links.ts",
     "sync:woocommerce-orders": "npx tsx scripts/sync-woocommerce-orders.ts",
+    "sync:woocommerce-products": "npx tsx scripts/sync-woocommerce-products.ts",
     "clear:qb-sales-receipts": "npx tsx scripts/clear-quickbooks-sales-receipts.ts",
     "db:studio": "drizzle-kit studio"
   },
