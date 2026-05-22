@@ -25,10 +25,16 @@ const useSsl =
       ? false
       : "require";
 
-const client = postgres(databaseUrl, { max: 1, ssl: useSsl });
+const client = postgres(databaseUrl, {
+  max: 1,
+  ssl: useSsl,
+  // Postgres NOTICEs (e.g. "schema already exists") are harmless on re-runs
+  onnotice: () => {},
+});
 const db = drizzle(client);
 
 console.log("Running Drizzle migrations...");
+await client`SET client_min_messages TO WARNING`;
 await migrate(db, { migrationsFolder: "./drizzle" });
 await client.end();
 console.log("Migrations complete.");

@@ -4,6 +4,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -52,6 +53,40 @@ export const stripeConnections = pgTable("stripe_connections", {
   addedByUserId: uuid("added_by_user_id")
     .notNull()
     .references(() => users.id, { onDelete: "restrict" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const communityMembers = pgTable("community_members", {
+  id: uuid().primaryKey().defaultRandom(),
+  email: text().notNull().unique(),
+  name: text(),
+  /** Earliest Stripe customer.created across linked accounts. */
+  joinedAt: timestamp("joined_at", { withTimezone: true }),
+  /** ISO 3166-1 alpha-2 (e.g. GB). */
+  countryCode: text("country_code"),
+  addressLine1: text("address_line1"),
+  addressLine2: text("address_line2"),
+  city: text(),
+  state: text(),
+  postalCode: text("postal_code"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Stripe customer ids linked to a member (multiple per connection allowed). */
+export const communityMemberStripeLinks = pgTable("community_member_stripe_links", {
+  id: uuid().primaryKey().defaultRandom(),
+  communityMemberId: uuid("community_member_id")
+    .notNull()
+    .references(() => communityMembers.id, { onDelete: "cascade" }),
+  stripeConnectionId: uuid("stripe_connection_id")
+    .notNull()
+    .references(() => stripeConnections.id, { onDelete: "cascade" }),
+  stripeCustomerId: text("stripe_customer_id").notNull().unique(),
+  stripeCustomerCreatedAt: timestamp("stripe_customer_created_at", {
+    withTimezone: true,
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

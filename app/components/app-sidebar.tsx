@@ -3,6 +3,7 @@ import type { AuthUser } from "~/lib/session.server";
 
 const navItems: { to: string; label: string; end?: boolean }[] = [
   { to: "/home", label: "Home", end: true },
+  { to: "/community", label: "Community" },
   { to: "/users", label: "Users" },
   { to: "/integrations/stripe", label: "Stripe" },
   { to: "/integrations/quickbooks", label: "QuickBooks" },

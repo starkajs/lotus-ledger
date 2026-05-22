@@ -13,6 +13,7 @@
     "invite-user": "node scripts/invite-user.mjs",
     "fly:secrets": "node scripts/fly-secrets-from-env.mjs",
     "fly:secrets:set": "node scripts/fly-secrets-from-env.mjs --apply",
+    "sync:community": "npx tsx scripts/sync-community-from-stripe.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
