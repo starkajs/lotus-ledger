@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from "react";
 import { Link } from "react-router";
 import type { Route } from "./+types/community.$memberId";
 import { AppPage } from "~/components/app-page";
+import { QuickbooksPushBadge } from "~/components/quickbooks-push-badge";
 import {
   getCommunityMemberById,
   type CommunityMemberStripeLink,
@@ -283,15 +284,7 @@ function StripeTransactionsPanel({
                       {formatMoneyMinor(tx.net, tx.currency)}
                     </td>
                     <td className="px-2 py-1.5">
-                      {tx.pushedToQuickbooks ? (
-                        <span className="inline-flex rounded bg-jade/15 px-1.5 py-0.5 text-[10px] font-medium text-jade">
-                          Yes
-                        </span>
-                      ) : (
-                        <span className="inline-flex rounded bg-sand/80 px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
-                          No
-                        </span>
-                      )}
+                      <QuickbooksPushBadge pushed={tx.pushedToQuickbooks} />
                     </td>
                     <td className="px-2 py-1.5 text-right">
                       <Link

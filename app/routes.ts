@@ -22,6 +22,10 @@ export default [
       "routes/integrations.stripe.transactions.tsx",
     ),
     route(
+      "integrations/stripe/transactions/summary",
+      "routes/integrations.stripe.transactions.summary.tsx",
+    ),
+    route(
       "integrations/stripe/transactions/:transactionId",
       "routes/integrations.stripe.transactions.$transactionId.tsx",
     ),

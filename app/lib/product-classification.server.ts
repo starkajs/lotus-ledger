@@ -383,6 +383,12 @@ export function canPushTransactionToQuickbooks(
     "productId" | "productCode" | "productQuickbooksItemId" | "pushedToQuickbooks"
   >,
 ): { ok: true } | { ok: false; reason: string } {
+  if (tx.pushedToQuickbooks === null) {
+    return {
+      ok: false,
+      reason: "Not applicable for QuickBooks (before 1 Apr 2026)",
+    };
+  }
   if (tx.pushedToQuickbooks) {
     return { ok: false, reason: "Already pushed to QuickBooks" };
   }

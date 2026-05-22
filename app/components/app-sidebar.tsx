@@ -13,7 +13,6 @@ const navItems: NavItem[] = [
   { to: "/home", label: "Home", end: true },
   { to: "/community", label: "Community" },
   { to: "/products", label: "Products" },
-  { to: "/users", label: "Users" },
   { to: "/integrations/woocommerce", label: "WooCommerce", end: true },
   { to: "/integrations/woocommerce/orders", label: "WC orders", child: true },
   { to: "/integrations/woocommerce/products", label: "WC products", child: true },
@@ -29,6 +28,7 @@ const navItems: NavItem[] = [
     child: true,
   },
   { to: "/integrations/jobs", label: "Job history" },
+  { to: "/users", label: "Users" },
 ];
 
 function navClassName({

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Form, Link, redirect, useLocation } from "react-router";
 import type { Route } from "./+types/integrations.stripe.transactions.$transactionId";
 import { AppPage } from "~/components/app-page";
+import { quickbooksPushStatus } from "~/lib/stripe-quickbooks.constants";
 import { SubmitButton } from "~/components/submit-button";
 import { formatMoneyMinor } from "~/lib/money";
 import { runIntegrationJob } from "~/lib/integration-jobs.server";
@@ -379,13 +380,15 @@ export default function StripeTransactionDetailPage({
             {formatDateTime(tx.availableOn)}
           </DetailRow>
           <DetailRow label="QuickBooks">
-            {tx.pushedToQuickbooks ? (
+            {quickbooksPushStatus(tx.pushedToQuickbooks) === "yes" ? (
               <span>
                 Pushed
                 {tx.quickbooksPushedAt
                   ? ` · ${formatDateTime(tx.quickbooksPushedAt)}`
                   : ""}
               </span>
+            ) : quickbooksPushStatus(tx.pushedToQuickbooks) === "na" ? (
+              "N/A (before 1 Apr 2026)"
             ) : (
               "Not pushed"
             )}

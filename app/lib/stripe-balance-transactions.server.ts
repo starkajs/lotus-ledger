@@ -21,11 +21,18 @@ import {
   stripeConnections,
 } from "~/db/schema";
 import type { ProductMatchStatus } from "./product-classification.server";
+import { initialPushedToQuickbooks } from "./stripe-quickbooks.constants";
 import { ensureCommunityMemberForEmail } from "./community-members.server";
+import {
+  calendarDateCreatedGte,
+  calendarDateCreatedLte,
+  type IsoDateString,
+} from "./date-range-filters";
 import {
   extractPaymentIntentIdFromStripeRaw,
   extractSkuFromStripeRaw,
   extractStripeGuestBillingFromStripeRaw,
+  extractStripeTransactionProductSignals,
 } from "./stripe-transaction-signals";
 
 export const STRIPE_TRANSACTIONS_PAGE_SIZE = 50;
@@ -59,7 +66,7 @@ export type StripeBalanceTransactionRecord = {
   productMatchRuleId: string | null;
   productMatchStatus: ProductMatchStatus | null;
   productMatchedAt: string | null;
-  pushedToQuickbooks: boolean;
+  pushedToQuickbooks: boolean | null;
   quickbooksPushedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -275,6 +282,7 @@ export async function upsertStripeBalanceTransaction(
       stripeCreatedAt: input.stripeCreatedAt,
       stripeRaw: input.stripeRaw,
       sku: input.sku ?? null,
+      pushedToQuickbooks: initialPushedToQuickbooks(input.stripeCreatedAt),
       ...memberFields,
     })
     .returning({ id: stripeBalanceTransactions.id });
@@ -292,10 +300,11 @@ export async function deleteAllStripeBalanceTransactions(): Promise<number> {
 
 export type ListStripeBalanceTransactionsOptions = {
   stripeConnectionId?: string;
-  pushedToQuickbooks?: "all" | "yes" | "no";
+  pushedToQuickbooks?: "all" | "yes" | "no" | "na";
   productMatch?: "all" | ProductMatchStatus;
-  /** ISO currency code (lowercase in DB), or omit / "all" for no filter. */
-  currency?: string;
+  /** Inclusive calendar dates (Europe/London) on stripeCreatedAt. */
+  dateFrom?: IsoDateString | null;
+  dateTo?: IsoDateString | null;
   page?: number;
   pageSize?: number;
 };
@@ -321,6 +330,8 @@ function buildListWhere(options: ListStripeBalanceTransactionsOptions) {
     parts.push(eq(stripeBalanceTransactions.pushedToQuickbooks, true));
   } else if (options.pushedToQuickbooks === "no") {
     parts.push(eq(stripeBalanceTransactions.pushedToQuickbooks, false));
+  } else if (options.pushedToQuickbooks === "na") {
+    parts.push(isNull(stripeBalanceTransactions.pushedToQuickbooks));
   }
 
   if (options.productMatch && options.productMatch !== "all") {
@@ -339,9 +350,21 @@ function buildListWhere(options: ListStripeBalanceTransactionsOptions) {
     }
   }
 
-  const currency = options.currency?.trim().toLowerCase();
-  if (currency && currency !== "all") {
-    parts.push(eq(stripeBalanceTransactions.currency, currency));
+  if (options.dateFrom) {
+    parts.push(
+      calendarDateCreatedGte(
+        stripeBalanceTransactions.stripeCreatedAt,
+        options.dateFrom,
+      ),
+    );
+  }
+  if (options.dateTo) {
+    parts.push(
+      calendarDateCreatedLte(
+        stripeBalanceTransactions.stripeCreatedAt,
+        options.dateTo,
+      ),
+    );
   }
 
   if (parts.length === 0) return undefined;
@@ -421,6 +444,278 @@ export async function listStripeBalanceTransactions(
     page: safePage,
     pageSize,
     totalPages,
+  };
+}
+
+const UNMAPPED_STRIPE_LOTUS_KEY = "__unmapped__";
+
+export type StripeTransactionLineAggregate = {
+  label: string;
+  type: string;
+  sku: string | null;
+  currency: string;
+  count: number;
+  grossMinor: number;
+  feeMinor: number;
+  netMinor: number;
+};
+
+export type StripeLotusProductAggregate = {
+  catalogProductId: string | null;
+  code: string | null;
+  name: string;
+  unmapped: boolean;
+  lines: StripeTransactionLineAggregate[];
+  subtotals: {
+    currency: string;
+    grossMinor: number;
+    feeMinor: number;
+    netMinor: number;
+  }[];
+};
+
+export type StripeTransactionsByProductResult = {
+  transactionCount: number;
+  groups: StripeLotusProductAggregate[];
+  grandTotals: {
+    currency: string;
+    grossMinor: number;
+    feeMinor: number;
+    netMinor: number;
+  }[];
+};
+
+function stripeLineKey(input: {
+  type: string;
+  description: string | null;
+  sku: string | null;
+  stripeRaw: Record<string, unknown> | null;
+}): string {
+  const signals = extractStripeTransactionProductSignals({
+    stripeRaw: input.stripeRaw,
+    description: input.description,
+    sku: input.sku,
+  });
+  const name =
+    signals.lineItem1 ??
+    signals.lineItemsSummary ??
+    signals.description ??
+    "";
+  return `${input.type}\0${name}\0${input.sku ?? ""}`;
+}
+
+function stripeLineLabel(input: {
+  type: string;
+  description: string | null;
+  sku: string | null;
+  stripeRaw: Record<string, unknown> | null;
+}): string {
+  const signals = extractStripeTransactionProductSignals({
+    stripeRaw: input.stripeRaw,
+    description: input.description,
+    sku: input.sku,
+  });
+  const name =
+    signals.lineItem1 ??
+    signals.lineItemsSummary ??
+    signals.description ??
+    input.type.replace(/_/g, " ");
+  const parts = [name];
+  if (input.sku) parts.push(`[${input.sku}]`);
+  parts.push(`(${input.type})`);
+  return parts.join(" ");
+}
+
+type StripeLineBucket = {
+  label: string;
+  type: string;
+  sku: string | null;
+  byCurrency: Map<
+    string,
+    { count: number; grossMinor: number; feeMinor: number; netMinor: number }
+  >;
+};
+
+type StripeLotusBucket = {
+  catalogProductId: string | null;
+  code: string | null;
+  name: string;
+  unmapped: boolean;
+  lines: Map<string, StripeLineBucket>;
+};
+
+export async function aggregateStripeTransactionsByProduct(
+  options: Omit<ListStripeBalanceTransactionsOptions, "page" | "pageSize"> = {},
+): Promise<StripeTransactionsByProductResult> {
+  const db = getDb();
+  const where = buildListWhere(options);
+
+  const rows = await db
+    .select({
+      amount: stripeBalanceTransactions.amount,
+      fee: stripeBalanceTransactions.fee,
+      net: stripeBalanceTransactions.net,
+      currency: stripeBalanceTransactions.currency,
+      type: stripeBalanceTransactions.type,
+      description: stripeBalanceTransactions.description,
+      sku: stripeBalanceTransactions.sku,
+      stripeRaw: stripeBalanceTransactions.stripeRaw,
+      productId: stripeBalanceTransactions.productId,
+      productCode: products.code,
+      productName: products.name,
+    })
+    .from(stripeBalanceTransactions)
+    .leftJoin(products, eq(stripeBalanceTransactions.productId, products.id))
+    .where(where);
+
+  const buckets = new Map<string, StripeLotusBucket>();
+
+  function ensureLotusBucket(key: string, lotus: {
+    catalogProductId: string | null;
+    code: string | null;
+    name: string;
+    unmapped: boolean;
+  }): StripeLotusBucket {
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        catalogProductId: lotus.catalogProductId,
+        code: lotus.code,
+        name: lotus.name,
+        unmapped: lotus.unmapped,
+        lines: new Map(),
+      };
+      buckets.set(key, bucket);
+    }
+    return bucket;
+  }
+
+  for (const row of rows) {
+    const lotus = row.productId
+      ? {
+          key: row.productId,
+          catalogProductId: row.productId,
+          code: row.productCode,
+          name: row.productName ?? row.productCode ?? "Product",
+          unmapped: false,
+        }
+      : {
+          key: UNMAPPED_STRIPE_LOTUS_KEY,
+          catalogProductId: null,
+          code: null,
+          name: "Unmapped",
+          unmapped: true,
+        };
+
+    const lotusBucket = ensureLotusBucket(lotus.key, lotus);
+    const lineKey = stripeLineKey(row);
+    let lineBucket = lotusBucket.lines.get(lineKey);
+    if (!lineBucket) {
+      lineBucket = {
+        label: stripeLineLabel(row),
+        type: row.type,
+        sku: row.sku,
+        byCurrency: new Map(),
+      };
+      lotusBucket.lines.set(lineKey, lineBucket);
+    }
+
+    const existing = lineBucket.byCurrency.get(row.currency) ?? {
+      count: 0,
+      grossMinor: 0,
+      feeMinor: 0,
+      netMinor: 0,
+    };
+    lineBucket.byCurrency.set(row.currency, {
+      count: existing.count + 1,
+      grossMinor: existing.grossMinor + row.amount,
+      feeMinor: existing.feeMinor + row.fee,
+      netMinor: existing.netMinor + row.net,
+    });
+  }
+
+  const grandByCurrency = new Map<
+    string,
+    { grossMinor: number; feeMinor: number; netMinor: number }
+  >();
+
+  const groups: StripeLotusProductAggregate[] = [...buckets.values()]
+    .map((bucket) => {
+      const lines: StripeTransactionLineAggregate[] = [];
+      const subByCurrency = new Map<
+        string,
+        { grossMinor: number; feeMinor: number; netMinor: number }
+      >();
+
+      for (const lineBucket of bucket.lines.values()) {
+        for (const [cur, totals] of lineBucket.byCurrency) {
+          lines.push({
+            label: lineBucket.label,
+            type: lineBucket.type,
+            sku: lineBucket.sku,
+            currency: cur,
+            count: totals.count,
+            grossMinor: totals.grossMinor,
+            feeMinor: totals.feeMinor,
+            netMinor: totals.netMinor,
+          });
+
+          const sub = subByCurrency.get(cur) ?? {
+            grossMinor: 0,
+            feeMinor: 0,
+            netMinor: 0,
+          };
+          subByCurrency.set(cur, {
+            grossMinor: sub.grossMinor + totals.grossMinor,
+            feeMinor: sub.feeMinor + totals.feeMinor,
+            netMinor: sub.netMinor + totals.netMinor,
+          });
+
+          const grand = grandByCurrency.get(cur) ?? {
+            grossMinor: 0,
+            feeMinor: 0,
+            netMinor: 0,
+          };
+          grandByCurrency.set(cur, {
+            grossMinor: grand.grossMinor + totals.grossMinor,
+            feeMinor: grand.feeMinor + totals.feeMinor,
+            netMinor: grand.netMinor + totals.netMinor,
+          });
+        }
+      }
+
+      lines.sort((a, b) => {
+        const label = a.label.localeCompare(b.label);
+        if (label !== 0) return label;
+        return a.currency.localeCompare(b.currency);
+      });
+
+      const subtotals = [...subByCurrency.entries()]
+        .map(([currency, totals]) => ({ currency, ...totals }))
+        .sort((a, b) => a.currency.localeCompare(b.currency));
+
+      return {
+        catalogProductId: bucket.catalogProductId,
+        code: bucket.code,
+        name: bucket.name,
+        unmapped: bucket.unmapped,
+        lines,
+        subtotals,
+      };
+    })
+    .sort((a, b) => {
+      if (a.unmapped !== b.unmapped) return a.unmapped ? 1 : -1;
+      return (a.code ?? a.name).localeCompare(b.code ?? b.name);
+    });
+
+  const grandTotals = [...grandByCurrency.entries()]
+    .map(([currency, totals]) => ({ currency, ...totals }))
+    .sort((a, b) => a.currency.localeCompare(b.currency));
+
+  return {
+    transactionCount: rows.length,
+    groups,
+    grandTotals,
   };
 }
 

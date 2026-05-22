@@ -181,7 +181,8 @@ export const stripeBalanceTransactions = pgTable(
     ),
     productMatchStatus: text("product_match_status"),
     productMatchedAt: timestamp("product_matched_at", { withTimezone: true }),
-    pushedToQuickbooks: boolean("pushed_to_quickbooks").notNull().default(false),
+    /** `true` pushed, `false` not pushed, `null` N/A (before QuickBooks cutoff). */
+    pushedToQuickbooks: boolean("pushed_to_quickbooks").default(false),
     quickbooksPushedAt: timestamp("quickbooks_pushed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

@@ -2,48 +2,34 @@ import { Fragment } from "react";
 import { Form, Link, useLocation } from "react-router";
 import type { Route } from "./+types/integrations.stripe.transactions";
 import { AppPage } from "~/components/app-page";
+import { QuickbooksPushBadge } from "~/components/quickbooks-push-badge";
+import {
+  StripeTransactionsFilterForm,
+  StripeTransactionsFilterSummary,
+} from "~/components/stripe-transactions-filter-form";
 import { SubmitButton } from "~/components/submit-button";
+import { formatCalendarDateShort } from "~/lib/date-range-filters";
 import { formatMoneyMinor } from "~/lib/money";
 import {
   listStripeBalanceTransactions,
-  listStripeTransactionCurrencies,
   STRIPE_TRANSACTIONS_PAGE_SIZE,
   type StripeBalanceTransactionRecord,
 } from "~/lib/stripe-balance-transactions.server";
 import { requireUser } from "~/lib/session.server";
 import { listStripeConnections } from "~/lib/stripe-connections.server";
 import { classifyAllStripeTransactions } from "~/lib/product-classification.server";
-import type { ProductMatchStatus } from "~/lib/product-classification.server";
 import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
+import { STRIPE_APP_SYNC_DAYS } from "~/lib/stripe-sync.constants";
+import {
+  parseStripeTransactionFiltersFromUrl,
+  stripeTransactionsHref,
+  toListStripeBalanceTransactionOptions,
+  type StripeTransactionListFilters,
+} from "~/lib/stripe-transactions-filters";
 import { syncStripeBalanceTransactions } from "~/lib/sync-stripe-transactions.server";
 
-function formatDateShort(iso: string) {
-  return new Date(iso).toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-type TransactionFilters = {
-  account: string;
-  pushed: "all" | "yes" | "no";
-  product: "all" | ProductMatchStatus;
-  currency: string;
-};
-
-function pageHref(page: number, filters: TransactionFilters) {
-  const params = new URLSearchParams();
-  if (filters.account) params.set("account", filters.account);
-  if (filters.pushed !== "all") params.set("pushed", filters.pushed);
-  if (filters.product !== "all") params.set("product", filters.product);
-  if (filters.currency !== "all") params.set("currency", filters.currency);
-  if (page > 1) params.set("page", String(page));
-  const query = params.toString();
-  return query ? `?${query}` : "?";
-}
+const TRANSACTIONS_PATH = "/integrations/stripe/transactions";
+const SUMMARY_PATH = "/integrations/stripe/transactions/summary";
 
 function ProductCell({ tx }: { tx: StripeBalanceTransactionRecord }) {
   if (tx.productCode) {
@@ -158,43 +144,16 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   const url = new URL(request.url);
   const connections = await listStripeConnections();
-
-  const account =
-    url.searchParams.get("account") ?? connections[0]?.id ?? "";
-  const pushedRaw = url.searchParams.get("pushed");
-  const pushed: TransactionFilters["pushed"] =
-    pushedRaw === "yes" || pushedRaw === "no" ? pushedRaw : "all";
-  const productRaw = url.searchParams.get("product");
-  const productStatuses: ProductMatchStatus[] = [
-    "matched",
-    "unmatched",
-    "manual",
-    "ambiguous",
-  ];
-  const product: TransactionFilters["product"] =
-    productRaw && productStatuses.includes(productRaw as ProductMatchStatus)
-      ? (productRaw as ProductMatchStatus)
-      : "all";
+  const defaultAccount = connections[0]?.id ?? "";
+  const filters = parseStripeTransactionFiltersFromUrl(
+    url.searchParams,
+    defaultAccount,
+  );
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
-  const currencyRaw = url.searchParams.get("currency")?.trim().toLowerCase() ?? "all";
 
-  const [txList, currencies] = await Promise.all([
-    listStripeBalanceTransactions({
-      stripeConnectionId: account || undefined,
-      pushedToQuickbooks: pushed,
-      productMatch: product,
-      currency: currencyRaw,
-      page,
-      pageSize: STRIPE_TRANSACTIONS_PAGE_SIZE,
-    }),
-    listStripeTransactionCurrencies(account || undefined),
-  ]);
-
-  const currency =
-    currencyRaw === "all" ||
-    currencies.map((c) => c.toLowerCase()).includes(currencyRaw)
-      ? currencyRaw
-      : "all";
+  const txList = await listStripeBalanceTransactions({
+    ...toListStripeBalanceTransactionOptions(filters, page, STRIPE_TRANSACTIONS_PAGE_SIZE),
+  });
 
   const connectionLabels = Object.fromEntries(
     connections.map((c) => [c.id, c.label]),
@@ -202,11 +161,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   return {
     connections,
-    account,
-    pushed,
-    product,
-    currency,
-    currencies,
+    ...filters,
     connectionLabels,
     ...txList,
   };
@@ -237,11 +192,10 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "sync") {
     const connectionId = String(form.get("connectionId") ?? "").trim() || undefined;
-    const last30Days = form.get("last30Days") === "1";
     try {
       const result = await syncStripeBalanceTransactions({
         connectionId,
-        days: last30Days ? 30 : undefined,
+        days: STRIPE_APP_SYNC_DAYS,
         audit: { triggeredBy: "app", userId: user.id },
       });
       return { scope: "sync" as const, success: true as const, result };
@@ -265,24 +219,37 @@ export default function StripeTransactionsPage({
     account,
     pushed,
     product,
-    currency,
-    currencies,
     connectionLabels,
     transactions,
     total,
     page,
     pageSize,
     totalPages,
+    dateFrom,
+    dateTo,
+    period,
   } = loaderData;
   const location = useLocation();
 
-  const filters: TransactionFilters = { account, pushed, product, currency };
+  const listFilters: StripeTransactionListFilters = {
+    account,
+    pushed,
+    product,
+    dateFrom,
+    dateTo,
+    period,
+  };
   const hasFilters =
-    pushed !== "all" || product !== "all" || currency !== "all";
+    pushed !== "all" ||
+    product !== "all" ||
+    dateFrom != null ||
+    dateTo != null ||
+    period != null;
   const unmatchedOnly = product === "unmatched";
+  const summaryHref = stripeTransactionsHref(SUMMARY_PATH, listFilters);
 
-  function filtersHref(overrides: Partial<TransactionFilters>) {
-    return pageHref(1, { ...filters, ...overrides });
+  function filtersHref(overrides: Partial<StripeTransactionListFilters>) {
+    return stripeTransactionsHref(TRANSACTIONS_PATH, { ...listFilters, ...overrides });
   }
   const returnTo = `${location.pathname}${location.search}`;
   const showAccountColumn = connections.length > 1;
@@ -309,6 +276,16 @@ export default function StripeTransactionsPage({
     <AppPage
       title="Stripe transactions"
       description="Balance transactions synced from each connected Stripe account."
+      actions={
+        connections.length > 0 ? (
+          <Link
+            to={summaryHref}
+            className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 text-sm hover:bg-surface"
+          >
+            Sales by product
+          </Link>
+        ) : undefined
+      }
     >
       {connections.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -316,15 +293,6 @@ export default function StripeTransactionsPage({
             {account ? (
               <input type="hidden" name="connectionId" value={account} />
             ) : null}
-            <label className="flex items-center gap-2 text-sm text-ink-muted">
-              <input
-                type="checkbox"
-                name="last30Days"
-                value="1"
-                className="rounded border-sand-dark/60"
-              />
-              Last 30 days only
-            </label>
             <SubmitButton
               intent="sync"
               variant="pill"
@@ -332,6 +300,9 @@ export default function StripeTransactionsPage({
             >
               Sync from Stripe
             </SubmitButton>
+            <span className="text-xs text-ink-faint">
+              Last {STRIPE_APP_SYNC_DAYS} days
+            </span>
           </Form>
           <Form method="post" action={postAction} className="flex flex-wrap items-center gap-2">
             {account ? (
@@ -436,68 +407,36 @@ export default function StripeTransactionsPage({
 
       {connections.length > 0 && (
         <>
-          <form method="get" className="mt-6 flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-0.5 text-xs">
-              <span className="text-ink-muted">Stripe account</span>
-              <select
-                name="account"
-                defaultValue={account}
-                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
-              >
-                {connections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-0.5 text-xs">
-              <span className="text-ink-muted">QuickBooks</span>
-              <select
-                name="pushed"
-                defaultValue={pushed}
-                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
-              >
-                <option value="all">All</option>
-                <option value="no">Not pushed</option>
-                <option value="yes">Pushed</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-0.5 text-xs">
-              <span className="text-ink-muted">Product</span>
-              <select
-                name="product"
-                defaultValue={product}
-                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
-              >
-                <option value="all">All</option>
-                <option value="matched">Matched</option>
-                <option value="unmatched">Unmatched</option>
-                <option value="ambiguous">Ambiguous</option>
-                <option value="manual">Manual</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-0.5 text-xs">
-              <span className="text-ink-muted">Currency</span>
-              <select
-                name="currency"
-                defaultValue={currency}
-                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[5rem]"
-              >
-                <option value="all">All</option>
-                {currencies.map((code) => (
-                  <option key={code} value={code.toLowerCase()}>
-                    {code}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="submit"
-              className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1.5 text-sm hover:bg-surface"
+          <nav className="mb-3 mt-6 flex gap-3 text-xs" aria-label="Stripe views">
+            <span className="font-medium text-dark">Transactions</span>
+            <span className="text-ink-faint" aria-hidden>
+              /
+            </span>
+            <Link
+              to={summaryHref}
+              className="text-ink-muted hover:text-teal hover:underline"
             >
-              Apply
-            </button>
+              Sales by product
+            </Link>
+          </nav>
+
+          <StripeTransactionsFilterForm
+            account={account}
+            connections={connections}
+            pushed={pushed}
+            product={product}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            period={period}
+          />
+          <StripeTransactionsFilterSummary
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            period={period}
+            product={product}
+          />
+
+          <div className="mt-2 flex flex-wrap gap-2">
             {!unmatchedOnly ? (
               <Link
                 to={filtersHref({ product: "unmatched" })}
@@ -515,13 +454,20 @@ export default function StripeTransactionsPage({
             )}
             {hasFilters && (
               <Link
-                to={account ? `?account=${account}` : "?"}
+                to={stripeTransactionsHref(TRANSACTIONS_PATH, {
+                  ...listFilters,
+                  pushed: "all",
+                  product: "all",
+                  dateFrom: null,
+                  dateTo: null,
+                  period: null,
+                })}
                 className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1.5 text-sm text-ink-muted hover:bg-surface"
               >
                 Clear filters
               </Link>
             )}
-          </form>
+          </div>
 
           {unmatchedOnly && (
             <p className="mt-2 text-xs text-ink-muted">
@@ -544,7 +490,8 @@ export default function StripeTransactionsPage({
 
           {transactions.length === 0 ? (
             <p className="mt-6 text-sm text-ink-muted">
-              Use Sync from Stripe to import balance transactions.
+              Use Sync from Stripe to import balance transactions (last{" "}
+              {STRIPE_APP_SYNC_DAYS} days).
             </p>
           ) : (
             <>
@@ -560,6 +507,8 @@ export default function StripeTransactionsPage({
                       <th className="px-2 py-1.5 font-medium">Customer</th>
                       <th className="px-2 py-1.5 font-medium">Product</th>
                       <th className="px-2 py-1.5 font-medium">CCY</th>
+                      <th className="px-2 py-1.5 font-medium text-right">Gross</th>
+                      <th className="px-2 py-1.5 font-medium text-right">Fee</th>
                       <th className="px-2 py-1.5 font-medium text-right">Net</th>
                       <th className="px-2 py-1.5 font-medium">QB</th>
                       <th className="px-2 py-1.5 font-medium">
@@ -578,7 +527,7 @@ export default function StripeTransactionsPage({
                             className={`group align-top hover:bg-sand/20 ${hasHints ? "" : "border-b border-sand-dark/30"}`}
                           >
                             <td className="px-2 py-1.5 whitespace-nowrap text-ink-muted">
-                              {formatDateShort(tx.stripeCreatedAt)}
+                              {formatCalendarDateShort(tx.stripeCreatedAt)}
                             </td>
                             {showAccountColumn && (
                               <td className="px-2 py-1.5 text-dark">
@@ -612,18 +561,16 @@ export default function StripeTransactionsPage({
                               {tx.currency.toUpperCase()}
                             </td>
                             <td className="px-2 py-1.5 text-right font-mono text-dark whitespace-nowrap">
+                              {formatMoneyMinor(tx.amount, tx.currency)}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-ink-muted whitespace-nowrap">
+                              {formatMoneyMinor(tx.fee, tx.currency)}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-dark whitespace-nowrap">
                               {formatMoneyMinor(tx.net, tx.currency)}
                             </td>
                             <td className="px-2 py-1.5">
-                              {tx.pushedToQuickbooks ? (
-                                <span className="inline-flex rounded bg-jade/15 px-1.5 py-0.5 text-[10px] font-medium text-jade">
-                                  Yes
-                                </span>
-                              ) : (
-                                <span className="inline-flex rounded bg-sand/80 px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
-                                  No
-                                </span>
-                              )}
+                              <QuickbooksPushBadge pushed={tx.pushedToQuickbooks} />
                             </td>
                             <td className="px-2 py-1.5 text-right">
                               <Link
@@ -643,6 +590,8 @@ export default function StripeTransactionsPage({
                               <td className="px-2 pb-2 pt-0 align-top">
                                 <StripeTextHints fields={hintFields} />
                               </td>
+                              <td className="px-2 pb-1.5 pt-0" />
+                              <td className="px-2 pb-1.5 pt-0" />
                               <td className="px-2 pb-1.5 pt-0" />
                               <td className="px-2 pb-1.5 pt-0" />
                               <td className="px-2 pb-1.5 pt-0" />
@@ -669,7 +618,7 @@ export default function StripeTransactionsPage({
                   <div className="flex gap-2">
                     {page > 1 ? (
                       <Link
-                        to={pageHref(page - 1, filters)}
+                        to={stripeTransactionsHref(TRANSACTIONS_PATH, listFilters, page - 1)}
                         className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1 hover:bg-surface"
                       >
                         Previous
@@ -681,7 +630,7 @@ export default function StripeTransactionsPage({
                     )}
                     {page < totalPages ? (
                       <Link
-                        to={pageHref(page + 1, filters)}
+                        to={stripeTransactionsHref(TRANSACTIONS_PATH, listFilters, page + 1)}
                         className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1 hover:bg-surface"
                       >
                         Next

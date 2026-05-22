@@ -51,15 +51,16 @@ Single account:
 npm run sync:stripe-transactions -- --connection <uuid>
 ```
 
-Last 30 days only (testing):
+**Sync from Stripe** on `/integrations/stripe/transactions` imports the **last 30 days** by default.
+
+For a different window via CLI:
 
 ```bash
 npm run sync:stripe-transactions -- --days 30
+npm run sync:stripe-transactions -- --since 2024-01-01
 ```
 
-Or set `STRIPE_SYNC_DAYS=30` in `.env` for CLI runs without `--days`. On the transactions page, tick **Last 30 days only** before syncing.
-
-Or use **Sync from Stripe** on `/integrations/stripe/transactions`.
+Or set `STRIPE_SYNC_DAYS` / `STRIPE_SYNC_SINCE` in `.env` for CLI runs without flags (omit both for all available history).
 
 ### Clear all (re-import)
 

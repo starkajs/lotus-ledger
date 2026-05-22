@@ -40,6 +40,14 @@ export function parseIsoDateParam(value: string | null | undefined): IsoDateStri
   return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
+/** Calendar date (YYYY-MM-DD) for an instant in the given IANA timezone. */
+export function calendarDateFromInstant(
+  instant: Date,
+  timeZone = APP_CALENDAR_TIMEZONE,
+): IsoDateString {
+  return calendarDateInZone(instant, timeZone);
+}
+
 function calendarDateInZone(instant: Date, timeZone: string): IsoDateString {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,

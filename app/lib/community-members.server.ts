@@ -43,6 +43,7 @@ export type CommunityMember = {
   createdAt: string;
   updatedAt: string;
   stripeLinks: CommunityMemberStripeLink[];
+  stripeGrossByCurrency: StripeGrossByCurrency[];
 };
 
 export type ListCommunityMembersOptions = {
