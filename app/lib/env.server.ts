@@ -57,6 +57,37 @@ export function getResendApiKey(): string | undefined {
   );
 }
 
+export function getResendFromAddress(): string | undefined {
+  const raw =
+    process.env.RESEND_FROM?.trim() ||
+    process.env.RESEND_FROM_EMAIL?.trim() ||
+    process.env.FROM_EMAIL?.trim() ||
+    undefined;
+  if (!raw) return undefined;
+  // Strip surrounding quotes from .env copy-paste (e.g. "Name <a@b.com>")
+  if (
+    (raw.startsWith('"') && raw.endsWith('"')) ||
+    (raw.startsWith("'") && raw.endsWith("'"))
+  ) {
+    return raw.slice(1, -1).trim();
+  }
+  return raw;
+}
+
+export function requireResendFromAddress(): string {
+  const from = getResendFromAddress();
+  if (!from) {
+    throw new Error(
+      "RESEND_FROM is not set (e.g. Lotus Ledger <andrew@jamyang.co.uk>)",
+    );
+  }
+  return from;
+}
+
+export function isResendConfigured(): boolean {
+  return Boolean(getResendApiKey() && getResendFromAddress());
+}
+
 export function getOAuthStateSecret(): string {
   const secret = process.env.SESSION_SECRET?.trim();
   if (secret) return secret;

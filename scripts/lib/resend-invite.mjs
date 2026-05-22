@@ -42,6 +42,10 @@ Please sign in and change your password when password management is available.
  * @param {{ apiKey: string; from: string; to: string; name: string | null; email: string; temporaryPassword: string; loginUrl: string }} params
  */
 export async function sendInviteEmailViaResend(params) {
+  if (!params.from) {
+    throw new Error("RESEND_FROM is not set");
+  }
+
   const { subject, text, html } = buildInviteEmail({
     name: params.name,
     email: params.email,
@@ -73,14 +77,27 @@ export async function sendInviteEmailViaResend(params) {
   return { id: body.id };
 }
 
+export function getResendFromAddress() {
+  let raw =
+    process.env.RESEND_FROM?.trim() ||
+    process.env.RESEND_FROM_EMAIL?.trim() ||
+    process.env.FROM_EMAIL?.trim() ||
+    "";
+  if (
+    raw &&
+    ((raw.startsWith('"') && raw.endsWith('"')) ||
+      (raw.startsWith("'") && raw.endsWith("'")))
+  ) {
+    raw = raw.slice(1, -1).trim();
+  }
+  return raw;
+}
+
 export function getResendConfigFromEnv() {
   const apiKey =
     process.env.RESEND_API_KEY?.trim() ||
     process.env.resend_api_key?.trim() ||
     "";
-  const from =
-    process.env.RESEND_FROM?.trim() ||
-    process.env.RESEND_FROM_EMAIL?.trim() ||
-    "";
+  const from = getResendFromAddress();
   return { apiKey, from, configured: Boolean(apiKey && from) };
 }

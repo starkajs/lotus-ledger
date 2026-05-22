@@ -1,5 +1,6 @@
 import { Form, Link, redirect, useSearchParams } from "react-router";
 import type { Route } from "./+types/login";
+import { SubmitButton } from "~/components/submit-button";
 import { recordLoginEvent } from "~/lib/auth-audit.server";
 import { getClientIp, getUserAgent } from "~/lib/http.server";
 import { verifyPassword } from "~/lib/password.server";
@@ -19,7 +20,7 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
-  const redirectTo = url.searchParams.get("redirectTo") ?? "/integrations/stripe";
+  const redirectTo = url.searchParams.get("redirectTo") ?? "/home";
   await redirectIfAuthenticated(request, redirectTo);
   return { redirectTo };
 }
@@ -28,7 +29,7 @@ export async function action({ request }: Route.ActionArgs) {
   const form = await request.formData();
   const email = String(form.get("email") ?? "").trim().toLowerCase();
   const password = String(form.get("password") ?? "");
-  const redirectTo = String(form.get("redirectTo") ?? "/integrations/stripe");
+  const redirectTo = String(form.get("redirectTo") ?? "/home");
 
   if (!email || !password) {
     return { error: "Email and password are required" };
@@ -82,7 +83,7 @@ export default function LoginPage({
 }: Route.ComponentProps) {
   const [searchParams] = useSearchParams();
   const redirectTo =
-    loaderData.redirectTo ?? searchParams.get("redirectTo") ?? "/integrations/stripe";
+    loaderData.redirectTo ?? searchParams.get("redirectTo") ?? "/home";
 
   return (
     <div className="flex min-h-screen flex-col pb-24">
@@ -141,12 +142,7 @@ export default function LoginPage({
             </p>
           )}
 
-          <button
-            type="submit"
-            className="w-full rounded-jamyang-pill bg-maroon px-5 py-2.5 text-sm font-medium text-surface-overlay transition-colors hover:bg-maroon-dark"
-          >
-            Log in
-          </button>
+          <SubmitButton loadingLabel="Signing in…">Log in</SubmitButton>
         </Form>
       </main>
     </div>

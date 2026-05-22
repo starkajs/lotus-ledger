@@ -52,6 +52,7 @@ const ALLOWED_KEYS = new Set([
   "RESEND_API_KEY",
   "RESEND_FROM",
   "RESEND_FROM_EMAIL",
+  "FROM_EMAIL",
   "resend_api_key",
 ]);
 
@@ -91,7 +92,11 @@ function buildSecrets(parsed) {
   if (!secrets.RESEND_FROM && secrets.RESEND_FROM_EMAIL) {
     secrets.RESEND_FROM = secrets.RESEND_FROM_EMAIL;
   }
+  if (!secrets.RESEND_FROM && secrets.FROM_EMAIL) {
+    secrets.RESEND_FROM = secrets.FROM_EMAIL;
+  }
   delete secrets.RESEND_FROM_EMAIL;
+  delete secrets.FROM_EMAIL;
 
   let appUrl = secrets.APP_URL;
   if (!appUrl || isLocalUrl(appUrl)) {

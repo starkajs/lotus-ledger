@@ -125,7 +125,7 @@ Seed the first user (set `SEED_USER_EMAIL` / `SEED_USER_PASSWORD` in `.env`, pro
 npm run db:seed
 ```
 
-For later invites with email, set `RESEND_API_KEY` and `RESEND_FROM` on Fly, then use `/integrations/invite` or `npm run invite-user`.
+For later invites with email, set `RESEND_API_KEY` and `RESEND_FROM` on Fly, then use `/users` or `npm run invite-user`.
 
 Register `https://lotus-ledger.fly.dev/integrations/quickbooks/callback` in the Intuit developer portal.
 

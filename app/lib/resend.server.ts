@@ -1,5 +1,9 @@
 import { Resend } from "resend";
-import { getResendApiKey as getResendApiKeyFromEnv } from "./env.server";
+import {
+  getResendApiKey as getResendApiKeyFromEnv,
+  isResendConfigured as isResendConfiguredFromEnv,
+  requireResendFromAddress,
+} from "./env.server";
 import { buildInviteEmailContent, type InviteEmailParams } from "./invite-email.server";
 
 let client: Resend | null = null;
@@ -9,17 +13,11 @@ export function getResendApiKey(): string | undefined {
 }
 
 export function getResendFromAddress(): string {
-  const from =
-    process.env.RESEND_FROM?.trim() ||
-    process.env.RESEND_FROM_EMAIL?.trim();
-  if (from) return from;
-  throw new Error(
-    "RESEND_FROM is not set (e.g. Lotus Ledger <onboarding@yourdomain.com>)",
-  );
+  return requireResendFromAddress();
 }
 
 export function isResendConfigured(): boolean {
-  return Boolean(getResendApiKey() && (process.env.RESEND_FROM || process.env.RESEND_FROM_EMAIL));
+  return isResendConfiguredFromEnv();
 }
 
 function getResendClient(): Resend {

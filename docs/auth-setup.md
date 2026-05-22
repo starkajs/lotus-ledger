@@ -11,7 +11,7 @@ Lotus Ledger uses **invite-only** access: there is no public registration.
 | `DATABASE_URL` | Postgres for users, sessions, audit log, Stripe connections |
 | `SEED_USER_EMAIL` / `SEED_USER_PASSWORD` | First user for `npm run db:seed` |
 | `RESEND_API_KEY` | Resend API key for invite emails |
-| `RESEND_FROM` | Sender, e.g. `Lotus Ledger <noreply@yourdomain.com>` |
+| `RESEND_FROM` | Sender address, e.g. `Lotus Ledger <andrew@jamyang.co.uk>` (verified domain in Resend) |
 | `APP_URL` | Used in invite emails for the login link |
 
 Generate secrets locally:
@@ -23,7 +23,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 Set on Fly:
 
 ```bash
-fly secrets set SESSION_SECRET=... ENCRYPTION_KEY=... RESEND_API_KEY=... RESEND_FROM="Lotus Ledger <noreply@yourdomain.com>" -a lotus-ledger
+fly secrets set SESSION_SECRET=... ENCRYPTION_KEY=... RESEND_API_KEY=... RESEND_FROM="Lotus Ledger <you@yourdomain.com>" -a lotus-ledger
 ```
 
 ## First user (seed)
@@ -54,7 +54,7 @@ With `RESEND_API_KEY` and `RESEND_FROM` set:
 npm run invite-user -- colleague@example.com "temporary-password" "Their Name"
 ```
 
-Or use **Invite user** at `/integrations/invite` while logged in (checkbox to send email when Resend is configured).
+Or use **Users** at `/users` while logged in (checkbox to send email when Resend is configured).
 
 ### Without email
 

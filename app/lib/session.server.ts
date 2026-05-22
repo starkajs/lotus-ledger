@@ -155,7 +155,7 @@ export async function requireUser(request: Request): Promise<AuthUser> {
 
 export async function redirectIfAuthenticated(
   request: Request,
-  redirectTo = "/integrations/stripe",
+  redirectTo = "/home",
 ) {
   const user = await getUserFromRequest(request);
   if (user) throw redirect(redirectTo);

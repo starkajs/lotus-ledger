@@ -1,5 +1,7 @@
-import { Form, Link, redirect, useSearchParams } from "react-router";
+import { Form, redirect, useSearchParams } from "react-router";
 import type { Route } from "./+types/integrations.quickbooks";
+import { AppPage } from "~/components/app-page";
+import { SubmitButton } from "~/components/submit-button";
 import {
   getAppUrl,
   getQuickBooksEnvironment,
@@ -22,14 +24,13 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await requireUser(request);
+  await requireUser(request);
   const appConfigured = isQuickBooksConfigured();
   const tokens = await getQuickBooksTokens();
   const connected = Boolean(tokens);
 
   if (!appConfigured) {
     return {
-      user,
       appConfigured: false as const,
       connected: false,
       connection: null,
@@ -45,7 +46,6 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   if (!connected) {
     return {
-      user,
       appConfigured: true as const,
       connected: false,
       connection: null,
@@ -61,7 +61,6 @@ export async function loader({ request }: Route.LoaderArgs) {
     const invoices = connection.ok ? await fetchQuickBooksInvoices(25) : [];
 
     return {
-      user,
       appConfigured: true as const,
       connected: true,
       connection,
@@ -73,7 +72,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return {
-      user,
       appConfigured: true as const,
       connected: true,
       connection: {
@@ -123,59 +121,39 @@ export default function QuickBooksIntegration({
   const justConnected = searchParams.get("connected") === "1";
   const error = searchParams.get("error");
 
+  const headerActions =
+    appConfigured && !connected ? (
+      <a
+        href="/integrations/quickbooks/connect"
+        className="rounded-jamyang-pill bg-maroon px-5 py-2 text-sm font-medium text-surface-overlay transition-colors hover:bg-maroon-dark"
+      >
+        Connect QuickBooks
+      </a>
+    ) : appConfigured && connected ? (
+      <Form method="post">
+        <input type="hidden" name="intent" value="disconnect" />
+        <SubmitButton
+          intent="disconnect"
+          variant="outline"
+          loadingLabel="Disconnecting…"
+        >
+          Disconnect
+        </SubmitButton>
+      </Form>
+    ) : null;
+
   return (
-    <div className="flex min-h-screen flex-col pb-24">
-      <header className="border-b border-sand-dark/40 bg-surface-overlay/80">
-        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
-          <Link
-            to="/"
-            className="text-sm font-medium text-teal underline-offset-2 hover:underline"
-          >
-            ← Home
-          </Link>
-          <div className="flex items-center gap-4 text-sm text-ink-muted">
-            <span>{loaderData.user.email}</span>
-            <Link
-              to="/logout"
-              className="text-teal underline-offset-2 hover:underline"
-            >
-              Log out
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl">QuickBooks Online</h1>
-            <p className="mt-2 max-w-xl text-ink-muted">
-              Intuit requires OAuth (there is no long-lived API key). Click
-              connect once — like Make.com — and we store a refresh token locally
-              for Jamyang&apos;s company.
-            </p>
-          </div>
-          {appConfigured && !connected && (
-            <a
-              href="/integrations/quickbooks/connect"
-              className="rounded-jamyang-pill bg-maroon px-5 py-2 text-sm font-medium text-surface-overlay transition-colors hover:bg-maroon-dark"
-            >
-              Connect QuickBooks
-            </a>
-          )}
-          {appConfigured && connected && (
-            <Form method="post">
-              <input type="hidden" name="intent" value="disconnect" />
-              <button
-                type="submit"
-                className="rounded-jamyang-pill border border-sand-dark/60 px-5 py-2 text-sm font-medium text-dark transition-colors hover:bg-surface"
-              >
-                Disconnect
-              </button>
-            </Form>
-          )}
-        </div>
-
+    <AppPage
+      title="QuickBooks Online"
+      description={
+        <>
+          Intuit requires OAuth (there is no long-lived API key). Click connect
+          once — like Make.com — and we store a refresh token locally for
+          Jamyang&apos;s company.
+        </>
+      }
+      actions={headerActions}
+    >
         {justConnected && (
           <p
             role="status"
@@ -353,7 +331,6 @@ APP_URL=http://localhost:5174`}
             )}
           </div>
         )}
-      </main>
-    </div>
+    </AppPage>
   );
 }

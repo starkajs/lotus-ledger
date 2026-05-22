@@ -1,5 +1,7 @@
 import { Form, Link, redirect } from "react-router";
 import type { Route } from "./+types/integrations.stripe";
+import { AppPage } from "~/components/app-page";
+import { SubmitButton } from "~/components/submit-button";
 import {
   createStripeConnection,
   deleteStripeConnection,
@@ -21,7 +23,6 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const user = await requireUser(request);
   const connections = await listStripeConnections();
 
   const url = new URL(request.url);
@@ -61,7 +62,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   return {
-    user,
     connections,
     selectedId,
     transactions,
@@ -163,7 +163,6 @@ export default function StripeIntegration({
   actionData,
 }: Route.ComponentProps) {
   const {
-    user,
     connections,
     selectedId,
     transactions,
@@ -178,53 +177,11 @@ export default function StripeIntegration({
   const selected = connections.find((c) => c.id === selectedId);
 
   return (
-    <div className="flex min-h-screen flex-col pb-24">
-      <header className="border-b border-sand-dark/40 bg-surface-overlay/80">
-        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
-          <Link
-            to="/"
-            className="text-sm font-medium text-teal underline-offset-2 hover:underline"
-          >
-            ← Home
-          </Link>
-          <div className="flex items-center gap-4 text-sm text-ink-muted">
-            <span>{user.email}</span>
-            <Link
-              to="/logout"
-              className="text-teal underline-offset-2 hover:underline"
-            >
-              Log out
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10 sm:px-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-3xl">Stripe accounts</h1>
-            <p className="mt-2 text-ink-muted">
-              Add secret keys for each Stripe account. Keys are encrypted in the
-              database and never shown again after saving.
-            </p>
-          </div>
-          <div className="flex gap-4 text-sm">
-            <Link
-              to="/integrations/invite"
-              className="text-teal underline-offset-2 hover:underline"
-            >
-              Invite user
-            </Link>
-            <Link
-              to="/integrations/quickbooks"
-              className="text-teal underline-offset-2 hover:underline"
-            >
-              QuickBooks →
-            </Link>
-          </div>
-        </div>
-
-        <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,18rem)_1fr]">
+    <AppPage
+      title="Stripe accounts"
+      description="Add secret keys for each Stripe account. Keys are encrypted in the database and never shown again after saving."
+    >
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,18rem)_1fr]">
           <aside className="space-y-4">
             <h2 className="text-sm font-medium text-dark">Saved accounts</h2>
             {connections.length === 0 ? (
@@ -279,12 +236,14 @@ export default function StripeIntegration({
                     {actionData.error}
                   </p>
                 )}
-                <button
-                  type="submit"
-                  className="w-full rounded-jamyang-pill bg-maroon px-4 py-2 text-sm font-medium text-surface-overlay hover:bg-maroon-dark"
+                <SubmitButton
+                  intent="add"
+                  variant="primary"
+                  className="w-full px-4 py-2"
+                  loadingLabel="Saving & verifying…"
                 >
                   Save & verify
-                </button>
+                </SubmitButton>
               </Form>
             </div>
           </aside>
@@ -307,12 +266,15 @@ export default function StripeIntegration({
                       name="connectionId"
                       value={selected.id}
                     />
-                    <button
-                      type="submit"
-                      className="text-sm text-maroon hover:underline"
+                    <SubmitButton
+                      intent="remove"
+                      matchField="connectionId"
+                      matchValue={selected.id}
+                      variant="ghost"
+                      loadingLabel="Removing…"
                     >
                       Remove account
-                    </button>
+                    </SubmitButton>
                   </Form>
                 </div>
 
@@ -439,7 +401,6 @@ export default function StripeIntegration({
             )}
           </section>
         </div>
-      </main>
-    </div>
+    </AppPage>
   );
 }
