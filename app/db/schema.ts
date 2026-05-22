@@ -158,6 +158,8 @@ export const stripeBalanceTransactions = pgTable(
     status: text().notNull(),
     description: text(),
     sourceId: text("source_id"),
+    /** `pi_…` from charge / payment_intent source (QuickBooks tracking # historically). */
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
     reportingCategory: text("reporting_category"),
     availableOn: timestamp("available_on", { withTimezone: true }),
     stripeCreatedAt: timestamp("stripe_created_at", { withTimezone: true }).notNull(),

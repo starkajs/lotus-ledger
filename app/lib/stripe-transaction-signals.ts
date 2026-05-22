@@ -44,6 +44,57 @@ function metadataString(value: unknown): string | null {
   }
 }
 
+function paymentIntentIdFromChargeLike(
+  charge: Record<string, unknown>,
+): string | null {
+  const pi = charge.payment_intent;
+  if (typeof pi === "string" && pi.startsWith("pi_")) {
+    return pi;
+  }
+  const expanded = asRecord(pi);
+  if (expanded && typeof expanded.id === "string" && expanded.id.startsWith("pi_")) {
+    return expanded.id;
+  }
+  return null;
+}
+
+/**
+ * Payment intent id (`pi_…`) from synced balance txn JSON (expanded source).
+ * Matches what QuickBooks has historically used as Tracking # / external id.
+ */
+export function extractPaymentIntentIdFromStripeRaw(
+  stripeRaw: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!stripeRaw) return null;
+
+  const source = stripeRaw.source;
+  if (typeof source === "string") {
+    return source.startsWith("pi_") ? source : null;
+  }
+
+  const src = asRecord(source);
+  if (!src) return null;
+
+  if (src.object === "payment_intent" && typeof src.id === "string") {
+    return src.id.startsWith("pi_") ? src.id : null;
+  }
+
+  if (src.object === "charge") {
+    return paymentIntentIdFromChargeLike(src);
+  }
+
+  if (src.object === "refund") {
+    const charge = src.charge;
+    if (typeof charge === "string") return null;
+    const chargeObj = asRecord(charge);
+    if (chargeObj) {
+      return paymentIntentIdFromChargeLike(chargeObj);
+    }
+  }
+
+  return null;
+}
+
 function chargeFromRaw(
   raw: Record<string, unknown> | null,
 ): Record<string, unknown> | null {

@@ -12,7 +12,8 @@ Synced from Stripe’s [Balance Transaction](https://docs.stripe.com/api/balance
 | `type` | e.g. `charge`, `refund`, `payout` |
 | `status` | e.g. `available`, `pending` |
 | `description` | Stripe description |
-| `source_id` | Linked object id (`chg_…`, etc.) |
+| `source_id` | Linked object id (`ch_…`, etc.) |
+| `stripe_payment_intent_id` | `pi_…` from expanded charge / payment_intent (matches QuickBooks tracking # historically) |
 | `reporting_category` | Stripe reporting category |
 | `available_on` | When funds are available |
 | `stripe_created_at` | Stripe `created` |
@@ -67,6 +68,15 @@ npm run clear:stripe-transactions -- --confirm
 ```
 
 Then sync again.
+
+### Backfill payment intent ids (existing rows)
+
+```bash
+npm run db:migrate
+npm run backfill:stripe-payment-intents
+```
+
+Reads `stripe_raw` only (no Stripe API). New syncs populate the column automatically.
 
 ## UI
 

@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import { and, count, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, isNull, or } from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   communityMembers,
@@ -8,7 +8,10 @@ import {
   stripeConnections,
 } from "~/db/schema";
 import type { ProductMatchStatus } from "./product-classification.server";
-import { extractSkuFromStripeRaw } from "./stripe-transaction-signals";
+import {
+  extractPaymentIntentIdFromStripeRaw,
+  extractSkuFromStripeRaw,
+} from "./stripe-transaction-signals";
 
 export const STRIPE_TRANSACTIONS_PAGE_SIZE = 50;
 
@@ -25,6 +28,7 @@ export type StripeBalanceTransactionRecord = {
   description: string | null;
   sku: string | null;
   sourceId: string | null;
+  stripePaymentIntentId: string | null;
   reportingCategory: string | null;
   availableOn: string | null;
   stripeCreatedAt: string;
@@ -57,6 +61,7 @@ export type UpsertStripeBalanceTransactionInput = {
   status: string;
   description?: string | null;
   sourceId?: string | null;
+  stripePaymentIntentId?: string | null;
   reportingCategory?: string | null;
   availableOn?: Date | null;
   stripeCreatedAt: Date;
@@ -120,6 +125,7 @@ export function mapStripeBalanceTransaction(
     status: tx.status,
     description: tx.description,
     sourceId: typeof tx.source === "string" ? tx.source : tx.source?.id ?? null,
+    stripePaymentIntentId: extractPaymentIntentIdFromStripeRaw(stripeRaw),
     reportingCategory: tx.reporting_category ?? null,
     availableOn: tx.available_on
       ? new Date(tx.available_on * 1000)
@@ -154,6 +160,10 @@ function rowToRecord(
     description: row.description,
     sku: row.sku,
     sourceId: row.sourceId,
+    stripePaymentIntentId:
+      row.stripePaymentIntentId ??
+      extractPaymentIntentIdFromStripeRaw(row.stripeRaw) ??
+      null,
     reportingCategory: row.reportingCategory,
     availableOn: row.availableOn?.toISOString() ?? null,
     stripeCreatedAt: row.stripeCreatedAt.toISOString(),
@@ -217,6 +227,7 @@ export async function upsertStripeBalanceTransaction(
         status: input.status,
         description: input.description ?? null,
         sourceId: input.sourceId ?? null,
+        stripePaymentIntentId: input.stripePaymentIntentId ?? null,
         reportingCategory: input.reportingCategory ?? null,
         availableOn: input.availableOn ?? null,
         stripeCreatedAt: input.stripeCreatedAt,
@@ -243,6 +254,7 @@ export async function upsertStripeBalanceTransaction(
       status: input.status,
       description: input.description ?? null,
       sourceId: input.sourceId ?? null,
+      stripePaymentIntentId: input.stripePaymentIntentId ?? null,
       reportingCategory: input.reportingCategory ?? null,
       availableOn: input.availableOn ?? null,
       stripeCreatedAt: input.stripeCreatedAt,
@@ -267,6 +279,8 @@ export type ListStripeBalanceTransactionsOptions = {
   stripeConnectionId?: string;
   pushedToQuickbooks?: "all" | "yes" | "no";
   productMatch?: "all" | ProductMatchStatus;
+  /** ISO currency code (lowercase in DB), or omit / "all" for no filter. */
+  currency?: string;
   page?: number;
   pageSize?: number;
 };
@@ -310,9 +324,32 @@ function buildListWhere(options: ListStripeBalanceTransactionsOptions) {
     }
   }
 
+  const currency = options.currency?.trim().toLowerCase();
+  if (currency && currency !== "all") {
+    parts.push(eq(stripeBalanceTransactions.currency, currency));
+  }
+
   if (parts.length === 0) return undefined;
   if (parts.length === 1) return parts[0];
   return and(...parts);
+}
+
+/** Distinct currency codes present in synced transactions (uppercase for display). */
+export async function listStripeTransactionCurrencies(
+  stripeConnectionId?: string,
+): Promise<string[]> {
+  const db = getDb();
+  const where = stripeConnectionId
+    ? eq(stripeBalanceTransactions.stripeConnectionId, stripeConnectionId)
+    : undefined;
+
+  const rows = await db
+    .selectDistinct({ currency: stripeBalanceTransactions.currency })
+    .from(stripeBalanceTransactions)
+    .where(where)
+    .orderBy(asc(stripeBalanceTransactions.currency));
+
+  return rows.map((row) => row.currency.toUpperCase());
 }
 
 export async function listStripeBalanceTransactions(
@@ -521,4 +558,68 @@ export async function countStripeBalanceTransactions(
     .where(where);
 
   return value;
+}
+
+/** Fill `stripe_payment_intent_id` from stored `stripe_raw` (no Stripe API calls). */
+export async function backfillStripePaymentIntentIds(options?: {
+  batchSize?: number;
+}): Promise<{ scanned: number; updated: number }> {
+  const db = getDb();
+  const batchSize = options?.batchSize ?? 500;
+  let scanned = 0;
+  let updated = 0;
+  let cursor: string | undefined;
+
+  for (;;) {
+    const where = cursor
+      ? and(
+          isNull(stripeBalanceTransactions.stripePaymentIntentId),
+          gt(stripeBalanceTransactions.id, cursor),
+        )
+      : isNull(stripeBalanceTransactions.stripePaymentIntentId);
+
+    const rows = await db
+      .select({
+        id: stripeBalanceTransactions.id,
+        stripeRaw: stripeBalanceTransactions.stripeRaw,
+      })
+      .from(stripeBalanceTransactions)
+      .where(where)
+      .orderBy(asc(stripeBalanceTransactions.id))
+      .limit(batchSize);
+
+    if (rows.length === 0) break;
+
+    const now = new Date();
+    const toUpdate: { id: string; stripePaymentIntentId: string }[] = [];
+    for (const row of rows) {
+      scanned += 1;
+      const paymentIntentId = extractPaymentIntentIdFromStripeRaw(row.stripeRaw);
+      if (paymentIntentId) {
+        toUpdate.push({ id: row.id, stripePaymentIntentId: paymentIntentId });
+      }
+    }
+
+    if (toUpdate.length > 0) {
+      await db.transaction(async (tx) => {
+        await Promise.all(
+          toUpdate.map((row) =>
+            tx
+              .update(stripeBalanceTransactions)
+              .set({
+                stripePaymentIntentId: row.stripePaymentIntentId,
+                updatedAt: now,
+              })
+              .where(eq(stripeBalanceTransactions.id, row.id)),
+          ),
+        );
+      });
+      updated += toUpdate.length;
+    }
+
+    cursor = rows[rows.length - 1]!.id;
+    if (rows.length < batchSize) break;
+  }
+
+  return { scanned, updated };
 }

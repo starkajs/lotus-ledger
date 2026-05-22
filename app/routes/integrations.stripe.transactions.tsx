@@ -6,6 +6,7 @@ import { SubmitButton } from "~/components/submit-button";
 import { formatMoneyMinor } from "~/lib/money";
 import {
   listStripeBalanceTransactions,
+  listStripeTransactionCurrencies,
   STRIPE_TRANSACTIONS_PAGE_SIZE,
   type StripeBalanceTransactionRecord,
 } from "~/lib/stripe-balance-transactions.server";
@@ -30,6 +31,7 @@ type TransactionFilters = {
   account: string;
   pushed: "all" | "yes" | "no";
   product: "all" | ProductMatchStatus;
+  currency: string;
 };
 
 function pageHref(page: number, filters: TransactionFilters) {
@@ -37,6 +39,7 @@ function pageHref(page: number, filters: TransactionFilters) {
   if (filters.account) params.set("account", filters.account);
   if (filters.pushed !== "all") params.set("pushed", filters.pushed);
   if (filters.product !== "all") params.set("product", filters.product);
+  if (filters.currency !== "all") params.set("currency", filters.currency);
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `?${query}` : "?";
@@ -173,14 +176,25 @@ export async function loader({ request }: Route.LoaderArgs) {
       ? (productRaw as ProductMatchStatus)
       : "all";
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
+  const currencyRaw = url.searchParams.get("currency")?.trim().toLowerCase() ?? "all";
 
-  const txList = await listStripeBalanceTransactions({
-    stripeConnectionId: account || undefined,
-    pushedToQuickbooks: pushed,
-    productMatch: product,
-    page,
-    pageSize: STRIPE_TRANSACTIONS_PAGE_SIZE,
-  });
+  const [txList, currencies] = await Promise.all([
+    listStripeBalanceTransactions({
+      stripeConnectionId: account || undefined,
+      pushedToQuickbooks: pushed,
+      productMatch: product,
+      currency: currencyRaw,
+      page,
+      pageSize: STRIPE_TRANSACTIONS_PAGE_SIZE,
+    }),
+    listStripeTransactionCurrencies(account || undefined),
+  ]);
+
+  const currency =
+    currencyRaw === "all" ||
+    currencies.map((c) => c.toLowerCase()).includes(currencyRaw)
+      ? currencyRaw
+      : "all";
 
   const connectionLabels = Object.fromEntries(
     connections.map((c) => [c.id, c.label]),
@@ -191,6 +205,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     account,
     pushed,
     product,
+    currency,
+    currencies,
     connectionLabels,
     ...txList,
   };
@@ -247,6 +263,8 @@ export default function StripeTransactionsPage({
     account,
     pushed,
     product,
+    currency,
+    currencies,
     connectionLabels,
     transactions,
     total,
@@ -256,8 +274,9 @@ export default function StripeTransactionsPage({
   } = loaderData;
   const location = useLocation();
 
-  const filters: TransactionFilters = { account, pushed, product };
-  const hasFilters = pushed !== "all" || product !== "all";
+  const filters: TransactionFilters = { account, pushed, product, currency };
+  const hasFilters =
+    pushed !== "all" || product !== "all" || currency !== "all";
   const unmatchedOnly = product === "unmatched";
 
   function filtersHref(overrides: Partial<TransactionFilters>) {
@@ -456,6 +475,21 @@ export default function StripeTransactionsPage({
                 <option value="manual">Manual</option>
               </select>
             </label>
+            <label className="flex flex-col gap-0.5 text-xs">
+              <span className="text-ink-muted">Currency</span>
+              <select
+                name="currency"
+                defaultValue={currency}
+                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[5rem]"
+              >
+                <option value="all">All</option>
+                {currencies.map((code) => (
+                  <option key={code} value={code.toLowerCase()}>
+                    {code}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               type="submit"
               className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1.5 text-sm hover:bg-surface"
@@ -523,6 +557,7 @@ export default function StripeTransactionsPage({
                       <th className="px-2 py-1.5 font-medium">Transaction</th>
                       <th className="px-2 py-1.5 font-medium">Customer</th>
                       <th className="px-2 py-1.5 font-medium">Product</th>
+                      <th className="px-2 py-1.5 font-medium">CCY</th>
                       <th className="px-2 py-1.5 font-medium text-right">Net</th>
                       <th className="px-2 py-1.5 font-medium">QB</th>
                       <th className="px-2 py-1.5 font-medium">
@@ -556,12 +591,23 @@ export default function StripeTransactionsPage({
                               >
                                 {tx.stripeBalanceTransactionId}
                               </div>
+                              {tx.stripePaymentIntentId && (
+                                <div
+                                  className="max-w-[12rem] truncate font-mono text-[10px] text-ink-faint"
+                                  title={tx.stripePaymentIntentId}
+                                >
+                                  {tx.stripePaymentIntentId}
+                                </div>
+                              )}
                             </td>
                             <td className="px-2 py-1.5">
                               <MemberCell tx={tx} />
                             </td>
                             <td className="px-2 py-1.5">
                               <ProductCell tx={tx} />
+                            </td>
+                            <td className="px-2 py-1.5 font-mono text-[10px] text-ink-muted uppercase">
+                              {tx.currency.toUpperCase()}
                             </td>
                             <td className="px-2 py-1.5 text-right font-mono text-dark whitespace-nowrap">
                               {formatMoneyMinor(tx.net, tx.currency)}
@@ -592,12 +638,11 @@ export default function StripeTransactionsPage({
                               {showAccountColumn && (
                                 <td className="px-2 pb-1.5 pt-0" />
                               )}
-                              <td
-                                colSpan={2}
-                                className="px-2 pb-2 pt-0 align-top"
-                              >
+                              <td className="px-2 pb-2 pt-0 align-top">
                                 <StripeTextHints fields={hintFields} />
                               </td>
+                              <td className="px-2 pb-1.5 pt-0" />
+                              <td className="px-2 pb-1.5 pt-0" />
                               <td className="px-2 pb-1.5 pt-0" />
                               <td className="px-2 pb-1.5 pt-0" />
                               <td className="px-2 pb-1.5 pt-0" />

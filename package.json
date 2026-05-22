@@ -17,6 +17,7 @@
     "sync:stripe-transactions": "npx tsx scripts/sync-stripe-transactions.ts",
     "classify:stripe-transactions": "npx tsx scripts/classify-stripe-transactions.ts",
     "clear:stripe-transactions": "npx tsx scripts/clear-stripe-transactions.ts",
+    "backfill:stripe-payment-intents": "npx tsx scripts/backfill-stripe-payment-intents.ts",
     "clear:qb-sales-receipts": "npx tsx scripts/clear-quickbooks-sales-receipts.ts",
     "db:studio": "drizzle-kit studio"
   },

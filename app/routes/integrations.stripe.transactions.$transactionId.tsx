@@ -303,6 +303,15 @@ export default function StripeTransactionDetailPage({
           <DetailRow label="Balance transaction ID">
             <span className="font-mono text-xs">{tx.stripeBalanceTransactionId}</span>
           </DetailRow>
+          <DetailRow label="Payment intent ID">
+            {tx.stripePaymentIntentId ? (
+              <span className="font-mono text-xs">{tx.stripePaymentIntentId}</span>
+            ) : (
+              <span className="text-ink-faint">
+                — (re-sync or run backfill if charge source was not expanded)
+              </span>
+            )}
+          </DetailRow>
           <DetailRow label="Source ID">
             {tx.sourceId ? (
               <span className="font-mono text-xs">{tx.sourceId}</span>
