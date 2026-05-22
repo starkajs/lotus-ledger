@@ -19,9 +19,9 @@ import {
 import type { WooCommerceOrder } from "~/lib/woocommerce-api.server";
 import { parseWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
 
-export const WOOCOMMERCE_ORDERS_PAGE_SIZE = 50;
+export { WOOCOMMERCE_ORDER_SYNC_DAYS } from "~/lib/woocommerce-orders.constants";
 
-export const WOOCOMMERCE_ORDER_SYNC_DAYS = 90;
+export const WOOCOMMERCE_ORDERS_PAGE_SIZE = 50;
 
 export type WooCommerceOrderLotusProduct = {
   catalogProductId: string;

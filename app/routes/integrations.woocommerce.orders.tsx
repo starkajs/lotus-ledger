@@ -18,6 +18,7 @@ import {
   listWooCommerceOrdersFromDb,
   type WooCommerceOrderRecord,
 } from "~/lib/woocommerce-orders.server";
+import { WOOCOMMERCE_ORDER_APP_SYNC_DAYS } from "~/lib/woocommerce-orders.constants";
 import { syncWooCommerceOrders } from "~/lib/sync-woocommerce-orders.server";
 import { requireUser } from "~/lib/session.server";
 
@@ -195,13 +196,16 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const form = await request.formData();
   if (form.get("intent") !== "sync") {
     return { scope: "sync" as const, error: "Unknown action" };
   }
   try {
-    const result = await syncWooCommerceOrders();
+    const result = await syncWooCommerceOrders({
+      days: WOOCOMMERCE_ORDER_APP_SYNC_DAYS,
+      audit: { triggeredBy: "app", userId: user.id },
+    });
     return { scope: "sync" as const, success: true as const, result };
   } catch (err) {
     return {
@@ -304,7 +308,14 @@ export default function WooCommerceOrdersPage({
           {syncResult && (
             <p className="mb-3 text-sm text-jade">
               Sync complete: {syncResult.created} created, {syncResult.updated}{" "}
-              updated, {syncResult.membersLinked} linked to community members.
+              updated, {syncResult.membersLinked} linked to community members
+              {syncResult.daysLimit != null && (
+                <span className="text-ink-muted">
+                  {" "}
+                  (last {syncResult.daysLimit} days)
+                </span>
+              )}
+              .
             </p>
           )}
 
@@ -350,7 +361,8 @@ export default function WooCommerceOrdersPage({
 
           {orders.length === 0 ? (
             <p className="mt-6 text-sm text-ink-muted">
-              Use Sync from WooCommerce to import orders (default: last 90 days).
+              Use Sync from WooCommerce to import orders from the last{" "}
+              {WOOCOMMERCE_ORDER_APP_SYNC_DAYS} days.
             </p>
           ) : (
             <>

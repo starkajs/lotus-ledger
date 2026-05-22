@@ -6,10 +6,8 @@
 import "dotenv/config";
 import { closeDb } from "../app/db/index";
 import { listWooCommerceOrders } from "../app/lib/woocommerce-api.server";
-import {
-  countWooCommerceOrders,
-  WOOCOMMERCE_ORDER_SYNC_DAYS,
-} from "../app/lib/woocommerce-orders.server";
+import { WOOCOMMERCE_ORDER_SYNC_DAYS } from "../app/lib/woocommerce-orders.constants";
+import { countWooCommerceOrders } from "../app/lib/woocommerce-orders.server";
 
 const sinceFlag = process.argv.indexOf("--since");
 const sinceRaw =

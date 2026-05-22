@@ -4,6 +4,7 @@ import type { Route } from "./+types/integrations.stripe.transactions.$transacti
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
 import { formatMoneyMinor } from "~/lib/money";
+import { runIntegrationJob } from "~/lib/integration-jobs.server";
 import {
   canPushTransactionToQuickbooks,
   classifyStripeTransactionById,
@@ -104,7 +105,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
   const returnTo = String(form.get("returnTo") ?? "/integrations/stripe/transactions");
@@ -117,12 +118,33 @@ export async function action({ request, params }: Route.ActionArgs) {
     if (!productId) {
       return { scope: "product" as const, error: "Select a product" };
     }
-    await setStripeTransactionProductManual(params.transactionId, productId);
+    await setStripeTransactionProductManual(params.transactionId, productId, {
+      triggeredBy: "app",
+      userId: user.id,
+    });
     return redirect(redirectUrl);
   }
 
   if (intent === "reclassify") {
-    await classifyStripeTransactionById(params.transactionId, { force: true });
+    await runIntegrationJob(
+      {
+        jobType: "stripe_transactions_classify",
+        triggeredBy: "app",
+        userId: user.id,
+        options: { transactionId: params.transactionId, single: true },
+      },
+      async (jobId) => {
+        await classifyStripeTransactionById(params.transactionId, {
+          force: true,
+          audit: {
+            triggeredBy: "app",
+            userId: user.id,
+            jobRunId: jobId,
+            action: "classify",
+          },
+        });
+      },
+    );
     return redirect(redirectUrl);
   }
 

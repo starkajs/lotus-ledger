@@ -85,14 +85,16 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
   const url = new URL(request.url);
 
   if (intent === "sync") {
     try {
-      const result = await syncWooCommerceProductsFromApi();
+      const result = await syncWooCommerceProductsFromApi({
+        audit: { triggeredBy: "app", userId: user.id },
+      });
       return { scope: "sync" as const, success: true as const, result };
     } catch (err) {
       return {

@@ -64,13 +64,16 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const form = await request.formData();
   if (form.get("intent") !== "refresh") {
     return { scope: "refresh" as const, error: "Unknown action" };
   }
   try {
-    const result = await syncQuickBooksSalesReceipts();
+    const result = await syncQuickBooksSalesReceipts({
+      triggeredBy: "app",
+      userId: user.id,
+    });
     return { scope: "refresh" as const, success: true as const, result };
   } catch (err) {
     return {

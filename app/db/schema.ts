@@ -416,3 +416,49 @@ export const woocommerceProducts = pgTable(
   },
   (table) => [unique("woocommerce_products_wc_product_id_unique").on(table.wcProductId)],
 );
+
+/** Sync / classify / import job runs (app UI and CLI). */
+export const integrationJobRuns = pgTable(
+  "integration_job_runs",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    jobType: text("job_type").notNull(),
+    status: text().notNull(),
+    triggeredBy: text("triggered_by").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    durationMs: integer("duration_ms"),
+    options: jsonb().$type<Record<string, unknown>>().notNull().default({}),
+    result: jsonb().$type<Record<string, unknown>>(),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [],
+);
+
+/** Audit trail when a Stripe transaction's product classification changes. */
+export const classificationEvents = pgTable(
+  "classification_events",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    stripeBalanceTransactionId: uuid("stripe_balance_transaction_id")
+      .notNull()
+      .references(() => stripeBalanceTransactions.id, { onDelete: "cascade" }),
+    jobRunId: uuid("job_run_id").references(() => integrationJobRuns.id, {
+      onDelete: "set null",
+    }),
+    triggeredBy: text("triggered_by").notNull(),
+    action: text().notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    previousProductId: uuid("previous_product_id"),
+    newProductId: uuid("new_product_id"),
+    previousMatchRuleId: uuid("previous_match_rule_id"),
+    newMatchRuleId: uuid("new_match_rule_id"),
+    previousStatus: text("previous_status"),
+    newStatus: text("new_status"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [],
+);

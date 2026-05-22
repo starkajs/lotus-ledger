@@ -28,6 +28,7 @@ const navItems: NavItem[] = [
     label: "QB sales receipts",
     child: true,
   },
+  { to: "/integrations/jobs", label: "Job history" },
 ];
 
 function navClassName({

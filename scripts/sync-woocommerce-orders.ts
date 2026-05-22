@@ -10,10 +10,10 @@
  */
 import "dotenv/config";
 import { closeDb } from "../app/db/index";
+import { WOOCOMMERCE_ORDER_SYNC_DAYS } from "../app/lib/woocommerce-orders.constants";
 import {
   parseWooSyncSinceDate,
   syncWooCommerceOrders,
-  WOOCOMMERCE_ORDER_SYNC_DAYS,
 } from "../app/lib/sync-woocommerce-orders.server";
 
 const args = process.argv.slice(2);

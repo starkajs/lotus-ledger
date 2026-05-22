@@ -7,6 +7,10 @@ import {
   type QuickBooksSalesReceiptLineItem,
 } from "./quickbooks-sales-receipt-parse";
 import { queryQuickBooksAll } from "./quickbooks-query.server";
+import {
+  runIntegrationJob,
+  type IntegrationAuditContext,
+} from "./integration-jobs.server";
 import { getQuickBooksTokens } from "./quickbooks-tokens.server";
 
 export const QUICKBOOKS_SALES_RECEIPTS_PAGE_SIZE = 50;
@@ -306,7 +310,7 @@ async function resolveRealmId(): Promise<string> {
  * Upsert sales receipts by (realm_id, quickbooks_id): update if exists, insert if new.
  * Only fetches TxnDate within the last QUICKBOOKS_SALES_RECEIPT_SYNC_DAYS days from QuickBooks.
  */
-export async function syncQuickBooksSalesReceipts(): Promise<QuickBooksSalesReceiptSyncResult> {
+async function syncQuickBooksSalesReceiptsInner(): Promise<QuickBooksSalesReceiptSyncResult> {
   const realmId = await resolveRealmId();
   const sinceDate = salesReceiptSyncSinceDate();
   const rows = await queryQuickBooksAll<QbSalesReceiptRow>(
@@ -379,6 +383,21 @@ export async function syncQuickBooksSalesReceipts(): Promise<QuickBooksSalesRece
     sinceDate,
     tombstoned: tombstonedRows.length,
   };
+}
+
+export async function syncQuickBooksSalesReceipts(
+  audit?: IntegrationAuditContext,
+): Promise<QuickBooksSalesReceiptSyncResult> {
+  const ctx = audit ?? { triggeredBy: "cli" as const };
+  return runIntegrationJob(
+    {
+      jobType: "quickbooks_sales_receipts_sync",
+      triggeredBy: ctx.triggeredBy,
+      userId: ctx.userId,
+      options: { daysLimit: QUICKBOOKS_SALES_RECEIPT_SYNC_DAYS },
+    },
+    () => syncQuickBooksSalesReceiptsInner(),
+  );
 }
 
 export type ListQuickBooksSalesReceiptsOptions = {

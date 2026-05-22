@@ -213,7 +213,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
 
@@ -224,6 +224,7 @@ export async function action({ request }: Route.ActionArgs) {
       const result = await classifyAllStripeTransactions({
         stripeConnectionId: connectionId,
         onlyUnmatched,
+        audit: { triggeredBy: "app", userId: user.id },
       });
       return { scope: "classify" as const, success: true as const, result };
     } catch (err) {
@@ -241,6 +242,7 @@ export async function action({ request }: Route.ActionArgs) {
       const result = await syncStripeBalanceTransactions({
         connectionId,
         days: last30Days ? 30 : undefined,
+        audit: { triggeredBy: "app", userId: user.id },
       });
       return { scope: "sync" as const, success: true as const, result };
     } catch (err) {

@@ -15,6 +15,7 @@ export default [
     route("products/rules", "routes/products.rules.tsx"),
     route("users", "routes/users.tsx"),
     route("integrations/invite", "routes/integrations.invite.tsx"),
+    route("integrations/jobs", "routes/integrations.jobs.tsx"),
     route("integrations/stripe", "routes/integrations.stripe.tsx"),
     route(
       "integrations/stripe/transactions",

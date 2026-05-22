@@ -7,6 +7,12 @@ import {
 } from "~/db/schema";
 import type { StripeBalanceTransactionRecord } from "./stripe-balance-transactions.server";
 import {
+  type ClassificationAuditContext,
+  recordClassificationEvent,
+  runIntegrationJob,
+  type IntegrationAuditContext,
+} from "./integration-jobs.server";
+import {
   collectClassificationText,
   type ClassificationText,
 } from "./stripe-transaction-signals";
@@ -140,7 +146,10 @@ export async function listActiveProductMatchRules(): Promise<ProductMatchRuleRec
 
 export async function classifyStripeTransactionById(
   transactionId: string,
-  options: { force?: boolean } = {},
+  options: {
+    force?: boolean;
+    audit?: ClassificationAuditContext;
+  } = {},
 ): Promise<ClassifyTransactionResult | null> {
   const db = getDb();
   const [row] = await db
@@ -150,6 +159,12 @@ export async function classifyStripeTransactionById(
     .limit(1);
 
   if (!row) return null;
+
+  const before = {
+    productId: row.productId,
+    productMatchRuleId: row.productMatchRuleId,
+    productMatchStatus: row.productMatchStatus,
+  };
 
   if (row.productMatchStatus === "manual" && !options.force) {
     return {
@@ -180,6 +195,19 @@ export async function classifyStripeTransactionById(
     })
     .where(eq(stripeBalanceTransactions.id, transactionId));
 
+  if (options.audit) {
+    await recordClassificationEvent({
+      stripeBalanceTransactionId: transactionId,
+      before,
+      after: {
+        productId: result.productId,
+        productMatchRuleId: result.productMatchRuleId,
+        productMatchStatus: result.status,
+      },
+      audit: options.audit,
+    });
+  }
+
   return result;
 }
 
@@ -187,6 +215,7 @@ export type ClassifyAllOptions = {
   force?: boolean;
   onlyUnmatched?: boolean;
   stripeConnectionId?: string;
+  audit?: IntegrationAuditContext;
 };
 
 export type ClassifyAllResult = {
@@ -197,9 +226,11 @@ export type ClassifyAllResult = {
   skippedManual: number;
 };
 
-export async function classifyAllStripeTransactions(
-  options: ClassifyAllOptions = {},
+async function classifyAllStripeTransactionsInner(
+  options: ClassifyAllOptions,
+  jobId: string,
 ): Promise<ClassifyAllResult> {
+  const audit = options.audit ?? { triggeredBy: "cli" as const };
   const db = getDb();
   const result: ClassifyAllResult = {
     processed: 0,
@@ -254,6 +285,12 @@ export async function classifyAllStripeTransactions(
   for (const { id } of rows) {
     const classified = await classifyStripeTransactionById(id, {
       force: options.force,
+      audit: {
+        triggeredBy: audit.triggeredBy,
+        userId: audit.userId,
+        jobRunId: jobId,
+        action: "classify",
+      },
     });
     if (!classified) continue;
     result.processed += 1;
@@ -269,11 +306,48 @@ export async function classifyAllStripeTransactions(
   return result;
 }
 
+export async function classifyAllStripeTransactions(
+  options: ClassifyAllOptions = {},
+): Promise<ClassifyAllResult> {
+  const audit = options.audit ?? { triggeredBy: "cli" as const };
+  const { audit: _audit, ...rest } = options;
+
+  return runIntegrationJob(
+    {
+      jobType: "stripe_transactions_classify",
+      triggeredBy: audit.triggeredBy,
+      userId: audit.userId,
+      options: {
+        force: rest.force,
+        onlyUnmatched: rest.onlyUnmatched,
+        stripeConnectionId: rest.stripeConnectionId,
+      },
+    },
+    (jobId) =>
+      classifyAllStripeTransactionsInner({ ...rest, audit }, jobId),
+  );
+}
+
 export async function setStripeTransactionProductManual(
   transactionId: string,
   productId: string,
+  audit?: IntegrationAuditContext,
 ): Promise<void> {
   const db = getDb();
+  const [row] = await db
+    .select()
+    .from(stripeBalanceTransactions)
+    .where(eq(stripeBalanceTransactions.id, transactionId))
+    .limit(1);
+
+  if (!row) return;
+
+  const before = {
+    productId: row.productId,
+    productMatchRuleId: row.productMatchRuleId,
+    productMatchStatus: row.productMatchStatus,
+  };
+
   const now = new Date();
   await db
     .update(stripeBalanceTransactions)
@@ -285,6 +359,22 @@ export async function setStripeTransactionProductManual(
       updatedAt: now,
     })
     .where(eq(stripeBalanceTransactions.id, transactionId));
+
+  const auditCtx = audit ?? { triggeredBy: "cli" as const };
+  await recordClassificationEvent({
+    stripeBalanceTransactionId: transactionId,
+    before,
+    after: {
+      productId,
+      productMatchRuleId: null,
+      productMatchStatus: "manual",
+    },
+    audit: {
+      triggeredBy: auditCtx.triggeredBy,
+      userId: auditCtx.userId,
+      action: "manual_set",
+    },
+  });
 }
 
 export function canPushTransactionToQuickbooks(

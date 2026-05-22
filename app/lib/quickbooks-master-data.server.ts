@@ -5,6 +5,10 @@ import {
   quickbooksClasses,
   quickbooksItems,
 } from "~/db/schema";
+import {
+  runIntegrationJob,
+  type IntegrationAuditContext,
+} from "./integration-jobs.server";
 import { getQuickBooksTokens } from "./quickbooks-tokens.server";
 import { queryQuickBooksAll } from "./quickbooks-query.server";
 
@@ -120,7 +124,7 @@ async function upsertByQuickBooksId<T extends { quickbooksId: string }>(options:
   return "created";
 }
 
-export async function syncQuickBooksAccounts(): Promise<QuickBooksMasterDataSyncResult> {
+async function syncQuickBooksAccountsInner(): Promise<QuickBooksMasterDataSyncResult> {
   const realmId = await resolveRealmId();
   const rows = await queryQuickBooksAll<QbAccountRow>(
     "select * from Account",
@@ -194,7 +198,21 @@ export async function syncQuickBooksAccounts(): Promise<QuickBooksMasterDataSync
   };
 }
 
-export async function syncQuickBooksClasses(): Promise<QuickBooksMasterDataSyncResult> {
+export async function syncQuickBooksAccounts(
+  audit?: IntegrationAuditContext,
+): Promise<QuickBooksMasterDataSyncResult> {
+  const ctx = audit ?? { triggeredBy: "cli" as const };
+  return runIntegrationJob(
+    {
+      jobType: "quickbooks_accounts_sync",
+      triggeredBy: ctx.triggeredBy,
+      userId: ctx.userId,
+    },
+    () => syncQuickBooksAccountsInner(),
+  );
+}
+
+async function syncQuickBooksClassesInner(): Promise<QuickBooksMasterDataSyncResult> {
   const realmId = await resolveRealmId();
   const rows = await queryQuickBooksAll<QbClassRow>("select * from Class", "Class");
   const db = getDb();
@@ -261,7 +279,21 @@ export async function syncQuickBooksClasses(): Promise<QuickBooksMasterDataSyncR
   };
 }
 
-export async function syncQuickBooksItems(): Promise<QuickBooksMasterDataSyncResult> {
+export async function syncQuickBooksClasses(
+  audit?: IntegrationAuditContext,
+): Promise<QuickBooksMasterDataSyncResult> {
+  const ctx = audit ?? { triggeredBy: "cli" as const };
+  return runIntegrationJob(
+    {
+      jobType: "quickbooks_classes_sync",
+      triggeredBy: ctx.triggeredBy,
+      userId: ctx.userId,
+    },
+    () => syncQuickBooksClassesInner(),
+  );
+}
+
+async function syncQuickBooksItemsInner(): Promise<QuickBooksMasterDataSyncResult> {
   const realmId = await resolveRealmId();
   const rows = await queryQuickBooksAll<QbItemRow>(
     "select * from Item where Type in ('Service', 'NonInventory', 'Inventory')",
@@ -341,6 +373,20 @@ export async function syncQuickBooksItems(): Promise<QuickBooksMasterDataSyncRes
     total: rows.length,
     syncedAt: syncedAt.toISOString(),
   };
+}
+
+export async function syncQuickBooksItems(
+  audit?: IntegrationAuditContext,
+): Promise<QuickBooksMasterDataSyncResult> {
+  const ctx = audit ?? { triggeredBy: "cli" as const };
+  return runIntegrationJob(
+    {
+      jobType: "quickbooks_items_sync",
+      triggeredBy: ctx.triggeredBy,
+      userId: ctx.userId,
+    },
+    () => syncQuickBooksItemsInner(),
+  );
 }
 
 async function latestSyncedAt(

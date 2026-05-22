@@ -17,6 +17,10 @@ import {
   type WooCommerceOrderLineItem,
 } from "~/db/schema";
 import { getWooCommerceStoreCurrency } from "~/lib/env.server";
+import {
+  runIntegrationJob,
+  type IntegrationAuditContext,
+} from "~/lib/integration-jobs.server";
 import type { WooCommerceProduct } from "~/lib/woocommerce-api.server";
 import { parseWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
 
@@ -531,7 +535,7 @@ export async function lookupOrderLineItemsInWooCommerceCatalog(
   });
 }
 
-export async function syncWooCommerceProductsFromApi(): Promise<{
+async function syncWooCommerceProductsFromApiInner(): Promise<{
   created: number;
   updated: number;
 }> {
@@ -556,4 +560,19 @@ export async function syncWooCommerceProductsFromApi(): Promise<{
   }
 
   return { created, updated };
+}
+
+export async function syncWooCommerceProductsFromApi(options?: {
+  audit?: IntegrationAuditContext;
+}): Promise<{ created: number; updated: number }> {
+  const audit = options?.audit ?? { triggeredBy: "cli" as const };
+
+  return runIntegrationJob(
+    {
+      jobType: "woocommerce_products_sync",
+      triggeredBy: audit.triggeredBy,
+      userId: audit.userId,
+    },
+    () => syncWooCommerceProductsFromApiInner(),
+  );
 }

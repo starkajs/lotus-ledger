@@ -1,15 +1,20 @@
 import { iterateWooCommerceOrders } from "~/lib/woocommerce-api.server";
 import {
+  runIntegrationJob,
+  type IntegrationAuditContext,
+} from "~/lib/integration-jobs.server";
+import { WOOCOMMERCE_ORDER_SYNC_DAYS } from "~/lib/woocommerce-orders.constants";
+import {
   linkWooCommerceOrderToMember,
   mapWooCommerceOrder,
   upsertWooCommerceOrder,
-  WOOCOMMERCE_ORDER_SYNC_DAYS,
 } from "~/lib/woocommerce-orders.server";
 
 export type SyncWooCommerceOrdersOptions = {
   days?: number;
   /** ISO8601 date (YYYY-MM-DD) — orders created on or after start of that UTC day. */
   since?: Date;
+  audit?: IntegrationAuditContext;
 };
 
 export type SyncWooCommerceOrdersResult = {
@@ -54,8 +59,8 @@ export function parseWooSyncSinceDate(value: string): Date {
   return date;
 }
 
-export async function syncWooCommerceOrders(
-  options: SyncWooCommerceOrdersOptions = {},
+async function syncWooCommerceOrdersInner(
+  options: SyncWooCommerceOrdersOptions,
 ): Promise<SyncWooCommerceOrdersResult> {
   const createdGte = options.since ?? createdAfterFromDays(options.days);
   const after = createdGte ? toWooCommerceAfterParam(createdGte) : undefined;
@@ -96,4 +101,23 @@ export async function syncWooCommerceOrders(
   return totals;
 }
 
-export { WOOCOMMERCE_ORDER_SYNC_DAYS };
+export async function syncWooCommerceOrders(
+  options: SyncWooCommerceOrdersOptions = {},
+): Promise<SyncWooCommerceOrdersResult> {
+  const audit = options.audit ?? { triggeredBy: "cli" as const };
+  const { audit: _audit, ...rest } = options;
+
+  return runIntegrationJob(
+    {
+      jobType: "woocommerce_orders_sync",
+      triggeredBy: audit.triggeredBy,
+      userId: audit.userId,
+      options: {
+        days: rest.days,
+        since: rest.since?.toISOString(),
+      },
+    },
+    () => syncWooCommerceOrdersInner({ ...rest, audit }),
+  );
+}
+

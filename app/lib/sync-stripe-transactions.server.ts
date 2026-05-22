@@ -10,6 +10,10 @@ import {
   extractStripeCustomerIdFromBalanceTransaction,
   extractStripeGuestBillingFromBalanceTransaction,
 } from "./stripe-customer.server";
+import {
+  runIntegrationJob,
+  type IntegrationAuditContext,
+} from "./integration-jobs.server";
 import { classifyStripeTransactionById } from "./product-classification.server";
 import {
   isPostedStripeBalanceTransaction,
@@ -23,6 +27,7 @@ export type SyncStripeTransactionsOptions = {
   days?: number;
   /** Only import balance transactions created on or after this instant (UTC calendar date if YYYY-MM-DD). */
   since?: Date;
+  audit?: IntegrationAuditContext;
 };
 
 export type SyncStripeTransactionsResult = {
@@ -102,9 +107,11 @@ async function* iterateBalanceTransactions(
   }
 }
 
-export async function syncStripeBalanceTransactions(
-  options: SyncStripeTransactionsOptions = {},
+async function syncStripeBalanceTransactionsInner(
+  options: SyncStripeTransactionsOptions,
+  jobId: string,
 ): Promise<SyncStripeTransactionsResult> {
+  const audit = options.audit ?? { triggeredBy: "cli" as const };
   const createdGte = resolveCreatedGte(options);
   const totals: SyncStripeTransactionsResult = {
     connectionsProcessed: 0,
@@ -207,4 +214,25 @@ export async function syncStripeBalanceTransactions(
   }
 
   return totals;
+}
+
+export async function syncStripeBalanceTransactions(
+  options: SyncStripeTransactionsOptions = {},
+): Promise<SyncStripeTransactionsResult> {
+  const audit = options.audit ?? { triggeredBy: "cli" as const };
+  const { audit: _audit, ...rest } = options;
+
+  return runIntegrationJob(
+    {
+      jobType: "stripe_transactions_sync",
+      triggeredBy: audit.triggeredBy,
+      userId: audit.userId,
+      options: {
+        connectionId: rest.connectionId,
+        days: rest.days,
+        since: rest.since?.toISOString(),
+      },
+    },
+    (jobId) => syncStripeBalanceTransactionsInner({ ...rest, audit }, jobId),
+  );
 }

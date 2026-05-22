@@ -169,6 +169,13 @@
       "when": 1781700000000,
       "tag": "0023_woocommerce_order_lotus_product",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781800000000,
+      "tag": "0024_integration_jobs",
+      "breakpoints": true
     }
   ]
 }
