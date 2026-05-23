@@ -57,6 +57,11 @@ const navItems: NavItem[] = [
     label: "QB sales receipts",
     child: true,
   },
+  {
+    to: "/integrations/quickbooks/refund-receipts",
+    label: "QB refund receipts",
+    child: true,
+  },
   { to: "/integrations/jobs", label: "Job history" },
   { to: "/users", label: "Users" },
 ];

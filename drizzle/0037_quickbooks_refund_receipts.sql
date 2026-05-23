@@ -1,0 +1,42 @@
+CREATE TABLE IF NOT EXISTS "quickbooks_refund_receipts" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"realm_id" text NOT NULL,
+	"quickbooks_id" text NOT NULL,
+	"doc_number" text,
+	"txn_date" date,
+	"tracking_num" text,
+	"customer_quickbooks_id" text,
+	"customer_name" text,
+	"customer_memo" text,
+	"bill_email" text,
+	"ship_addr_summary" text,
+	"class_ref_id" text,
+	"class_ref_name" text,
+	"department_ref_id" text,
+	"department_ref_name" text,
+	"total_amt" text NOT NULL,
+	"total_tax" text,
+	"currency_code" text,
+	"currency_name" text,
+	"payment_method" text,
+	"deposit_to_account_ref" text,
+	"private_note" text,
+	"sync_token" text,
+	"qb_created_at" timestamp with time zone,
+	"qb_updated_at" timestamp with time zone,
+	"line_count" integer,
+	"line_summary" text,
+	"line_items" jsonb,
+	"quickbooks_raw" jsonb,
+	"qb_status" text DEFAULT 'active' NOT NULL,
+	"last_seen_at" timestamp with time zone,
+	"deleted_in_qb_at" timestamp with time zone,
+	"synced_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "qb_refund_receipts_realm_qb_id_unique" UNIQUE("realm_id","quickbooks_id")
+);
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "qb_refund_receipts_realm_idx" ON "quickbooks_refund_receipts" USING btree ("realm_id");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "qb_refund_receipts_txn_date_idx" ON "quickbooks_refund_receipts" USING btree ("realm_id", "txn_date" DESC);

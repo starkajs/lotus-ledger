@@ -4,6 +4,10 @@ import type {
   QuickBooksSalesReceiptCreate,
   QuickBooksSalesReceiptCreateResponse,
 } from "~/lib/quickbooks-sales-receipt-create";
+import type {
+  QuickBooksRefundReceiptCreate,
+  QuickBooksRefundReceiptCreateResponse,
+} from "~/lib/quickbooks-refund-receipt-create";
 
 const MINOR_VERSION = 65;
 
@@ -86,4 +90,48 @@ export async function createQuickBooksSalesReceipt(
     throw new Error(result.message);
   }
   return result.salesReceipt;
+}
+
+export type QuickBooksRefundReceiptCreateOutcome =
+  | {
+      ok: true;
+      refundReceipt: QuickBooksRefundReceiptCreateResponse["RefundReceipt"];
+      raw: unknown;
+    }
+  | { ok: false; message: string; raw: unknown };
+
+/**
+ * Create a Refund Receipt in QuickBooks.
+ * POST /v3/company/{realmId}/refundreceipt?minorversion=65
+ */
+export async function createQuickBooksRefundReceiptDetailed(
+  payload: QuickBooksRefundReceiptCreate,
+): Promise<QuickBooksRefundReceiptCreateOutcome> {
+  const { client, tokens } = await getAuthenticatedQuickBooksClient();
+  const url = `${getApiBaseUrl()}/v3/company/${tokens.realmId}/refundreceipt?minorversion=${MINOR_VERSION}`;
+
+  try {
+    const response = await client.makeApiCall({
+      url,
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const body = response.json as QuickBooksRefundReceiptCreateResponse;
+    if (!body?.RefundReceipt?.Id) {
+      return {
+        ok: false,
+        message: "QuickBooks did not return a RefundReceipt Id",
+        raw: body,
+      };
+    }
+    return { ok: true, refundReceipt: body.RefundReceipt, raw: body };
+  } catch (err) {
+    const raw = quickBooksErrorPayload(err) ?? { error: String(err) };
+    return { ok: false, message: formatQuickBooksErrorMessage(err, raw), raw };
+  }
 }

@@ -26,7 +26,7 @@ function messageForIntent(intent: string, pathname: string): string {
       return INTENT_MESSAGES["push-qb-bulk"] ?? "Pushing to QuickBooks…";
     }
     if (pathname.includes("/integrations/stripe/transactions/quickbooks-push")) {
-      return "Creating Sales Receipt in QuickBooks…";
+      return "Creating receipt in QuickBooks…";
     }
     return INTENT_MESSAGES.push ?? "Pushing to QuickBooks…";
   }

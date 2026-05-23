@@ -1,11 +1,17 @@
 import {
+  createQuickBooksRefundReceiptDetailed,
   createQuickBooksSalesReceiptDetailed,
+  type QuickBooksRefundReceiptCreateOutcome,
   type QuickBooksSalesReceiptCreateOutcome,
 } from "~/lib/quickbooks-api-write.server";
 import {
   planStripeQuickBooksPushForTransaction,
   type StripeQuickBooksPushPlan,
 } from "~/lib/stripe-quickbooks-push-plan.server";
+import {
+  getQuickBooksRefundReceiptByQuickbooksId,
+  upsertQuickBooksRefundReceiptFromApi,
+} from "~/lib/quickbooks-refund-receipts.server";
 import {
   getQuickBooksSalesReceiptByQuickbooksId,
   upsertQuickBooksSalesReceiptFromApi,
@@ -16,6 +22,7 @@ import type { StripeBalanceTransactionRecord } from "~/lib/stripe-balance-transa
 import {
   clearStripeBalanceTransactionQuickBooksPush,
   getStripeBalanceTransactionById,
+  setStripeBalanceTransactionQuickBooksRefundReceipt,
   setStripeBalanceTransactionQuickBooksSalesReceipt,
 } from "~/lib/stripe-balance-transactions.server";
 
@@ -41,17 +48,47 @@ export type StripeQuickBooksBulkPushResult = {
   failedSample: StripeQuickBooksBulkPushFailure[];
 };
 
+export type StripeQuickBooksPushApiOutcome =
+  | QuickBooksSalesReceiptCreateOutcome
+  | QuickBooksRefundReceiptCreateOutcome;
+
 export type StripeQuickBooksPushExecuteResult = {
   plan: StripeQuickBooksPushPlan;
-  api: QuickBooksSalesReceiptCreateOutcome | null;
+  api: StripeQuickBooksPushApiOutcome | null;
   salesReceiptId: string | null;
+  refundReceiptId: string | null;
   /** Lotus `quickbooks_sales_receipts.id` when imported or already synced. */
   lotusSalesReceiptId: string | null;
+  /** Lotus `quickbooks_refund_receipts.id` when imported or already synced. */
+  lotusRefundReceiptId: string | null;
 };
 
 export type ClearStripeQuickBooksPushResult =
   | { ok: true }
   | { ok: false; reason: string };
+
+const emptyPlan = (): StripeQuickBooksPushPlan => ({
+  documentKind: "sales_receipt",
+  salesReceipt: null,
+  refundReceipt: null,
+  grossAmountMajor: null,
+  lineAmountMajor: null,
+  vatRatePercent: 0,
+  currency: null,
+  taxCodeId: null,
+  taxCodeSource: null,
+  issues: ["Transaction not found"],
+  ready: false,
+});
+
+function stripeQuickBooksDocumentAlreadyPushed(
+  tx: Pick<
+    StripeBalanceTransactionRecord,
+    "quickbooksSalesReceiptId" | "quickbooksRefundReceiptId"
+  >,
+): string | null {
+  return tx.quickbooksSalesReceiptId ?? tx.quickbooksRefundReceiptId ?? null;
+}
 
 export async function clearStripeTransactionQuickBooksPush(
   lotusTransactionId: string,
@@ -65,44 +102,110 @@ export async function pushStripeBalanceTransactionToQuickBooks(
   const tx = await getStripeBalanceTransactionById(lotusTransactionId);
   if (!tx) {
     return {
-      plan: {
-        salesReceipt: null,
-        grossAmountMajor: null,
-        lineAmountMajor: null,
-        vatRatePercent: 0,
-        currency: null,
-        taxCodeId: null,
-        taxCodeSource: null,
-        issues: ["Transaction not found"],
-        ready: false,
-      },
+      plan: emptyPlan(),
       api: null,
       salesReceiptId: null,
+      refundReceiptId: null,
       lotusSalesReceiptId: null,
+      lotusRefundReceiptId: null,
     };
   }
 
-  if (tx.quickbooksSalesReceiptId) {
+  const existingDocumentId = stripeQuickBooksDocumentAlreadyPushed(tx);
+  if (existingDocumentId) {
+    const documentLabel = tx.quickbooksRefundReceiptId
+      ? "Refund Receipt"
+      : "Sales Receipt";
     return {
       plan: await planStripeQuickBooksPushForTransaction({ transaction: tx }),
       api: {
         ok: false,
-        message: `Already pushed (QuickBooks Sales Receipt ${tx.quickbooksSalesReceiptId})`,
-        raw: { existingQuickbooksSalesReceiptId: tx.quickbooksSalesReceiptId },
+        message: `Already pushed (QuickBooks ${documentLabel} ${existingDocumentId})`,
+        raw: {
+          existingQuickbooksSalesReceiptId: tx.quickbooksSalesReceiptId,
+          existingQuickbooksRefundReceiptId: tx.quickbooksRefundReceiptId,
+        },
       },
       salesReceiptId: tx.quickbooksSalesReceiptId,
+      refundReceiptId: tx.quickbooksRefundReceiptId,
       lotusSalesReceiptId: null,
+      lotusRefundReceiptId: null,
     };
   }
 
   const plan = await planStripeQuickBooksPushForTransaction({ transaction: tx });
-  if (!plan.ready || !plan.salesReceipt) {
-    return { plan, api: null, salesReceiptId: null, lotusSalesReceiptId: null };
+  const hasPayload =
+    plan.documentKind === "refund_receipt"
+      ? Boolean(plan.refundReceipt)
+      : Boolean(plan.salesReceipt);
+  if (!plan.ready || !hasPayload) {
+    return {
+      plan,
+      api: null,
+      salesReceiptId: null,
+      refundReceiptId: null,
+      lotusSalesReceiptId: null,
+      lotusRefundReceiptId: null,
+    };
   }
 
-  const api = await createQuickBooksSalesReceiptDetailed(plan.salesReceipt);
+  if (plan.documentKind === "refund_receipt" && plan.refundReceipt) {
+    const api = await createQuickBooksRefundReceiptDetailed(plan.refundReceipt);
+    if (!api.ok) {
+      return {
+        plan,
+        api,
+        salesReceiptId: null,
+        refundReceiptId: null,
+        lotusSalesReceiptId: null,
+        lotusRefundReceiptId: null,
+      };
+    }
+
+    const refundReceiptId = api.refundReceipt.Id;
+    const tokens = await getQuickBooksTokens();
+    let lotusRefundReceiptId: string | null = null;
+
+    if (tokens) {
+      const existing = await getQuickBooksRefundReceiptByQuickbooksId(
+        refundReceiptId,
+        tokens.realmId,
+      );
+      if (existing) {
+        lotusRefundReceiptId = existing.id;
+      } else {
+        const imported = await upsertQuickBooksRefundReceiptFromApi(
+          api.refundReceipt,
+        );
+        lotusRefundReceiptId = imported.id;
+      }
+    }
+
+    await setStripeBalanceTransactionQuickBooksRefundReceipt(
+      lotusTransactionId,
+      refundReceiptId,
+    );
+
+    return {
+      plan,
+      api,
+      salesReceiptId: null,
+      refundReceiptId,
+      lotusSalesReceiptId: null,
+      lotusRefundReceiptId,
+    };
+  }
+
+  const api = await createQuickBooksSalesReceiptDetailed(plan.salesReceipt!);
   if (!api.ok) {
-    return { plan, api, salesReceiptId: null, lotusSalesReceiptId: null };
+    return {
+      plan,
+      api,
+      salesReceiptId: null,
+      refundReceiptId: null,
+      lotusSalesReceiptId: null,
+      lotusRefundReceiptId: null,
+    };
   }
 
   const salesReceiptId = api.salesReceipt.Id;
@@ -127,7 +230,14 @@ export async function pushStripeBalanceTransactionToQuickBooks(
     salesReceiptId,
   );
 
-  return { plan, api, salesReceiptId, lotusSalesReceiptId };
+  return {
+    plan,
+    api,
+    salesReceiptId,
+    refundReceiptId: null,
+    lotusSalesReceiptId,
+    lotusRefundReceiptId: null,
+  };
 }
 
 function recordSkip(
@@ -172,7 +282,7 @@ export async function pushStripeBalanceTransactionsBulkToQuickBooks(
   };
 
   for (const tx of transactions) {
-    if (tx.quickbooksSalesReceiptId) {
+    if (stripeQuickBooksDocumentAlreadyPushed(tx)) {
       recordSkip(result, tx, "Already pushed to QuickBooks");
       continue;
     }
@@ -185,7 +295,10 @@ export async function pushStripeBalanceTransactionsBulkToQuickBooks(
 
     const outcome = await pushStripeBalanceTransactionToQuickBooks(tx.id);
 
-    if (outcome.api?.ok && outcome.salesReceiptId) {
+    if (
+      outcome.api?.ok &&
+      (outcome.salesReceiptId || outcome.refundReceiptId)
+    ) {
       result.pushed += 1;
       continue;
     }

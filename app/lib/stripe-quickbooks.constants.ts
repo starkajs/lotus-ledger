@@ -34,3 +34,10 @@ export function initialPushedToQuickbooks(
 ): boolean | null {
   return isStripeQuickbooksNa(stripeCreatedAt) ? null : false;
 }
+
+/** Stripe refunds are negative balance transactions (often `type: refund`). */
+export function isStripeRefundTransaction(
+  tx: Pick<{ type: string; amount: number }, "type" | "amount">,
+): boolean {
+  return tx.type === "refund" || tx.amount < 0;
+}

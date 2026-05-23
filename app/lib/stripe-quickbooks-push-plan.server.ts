@@ -7,6 +7,7 @@ import {
   listQuickBooksTaxCodes,
 } from "~/lib/quickbooks-master-data.server";
 import type { QuickBooksSalesReceiptCreate } from "~/lib/quickbooks-sales-receipt-create";
+import type { QuickBooksRefundReceiptCreate } from "~/lib/quickbooks-refund-receipt-create";
 import {
   resolveStripeQuickBooksPushTaxCode,
   type QuickBooksPushTaxCodeSource,
@@ -17,7 +18,12 @@ import {
   DEFAULT_STRIPE_QB_PAYMENT_REF_TEMPLATE,
   getStripeConnectionQuickBooksMapping,
 } from "~/lib/stripe-connections-quickbooks.server";
-import { stripeGrossToQuickBooksLineAmount } from "~/lib/stripe-quickbooks-push-amount";
+import {
+  stripeGrossToQuickBooksLineAmount,
+  stripeRefundGrossToQuickBooksLineAmount,
+} from "~/lib/stripe-quickbooks-push-amount";
+import { isStripeRefundTransaction } from "~/lib/stripe-quickbooks.constants";
+import { stripeQuickBooksTrackingNum } from "~/lib/stripe-quickbooks-receipt-link.server";
 import type { StripeBalanceTransactionRecord } from "~/lib/stripe-balance-transactions.server";
 import { getProductById } from "~/lib/products.server";
 import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
@@ -41,9 +47,15 @@ function defaultPrivateNoteForLotusPush(
   return `${product} | LL ${lotusTransactionId}`;
 }
 
+export type StripeQuickBooksPushDocumentKind =
+  | "sales_receipt"
+  | "refund_receipt";
+
 export type StripeQuickBooksPushPlan = {
+  documentKind: StripeQuickBooksPushDocumentKind;
   salesReceipt: QuickBooksSalesReceiptCreate | null;
-  /** Stripe gross (customer paid). */
+  refundReceipt: QuickBooksRefundReceiptCreate | null;
+  /** Stripe gross (customer paid / refunded). */
   grossAmountMajor: number | null;
   /** Net line amount sent to QuickBooks (ex-VAT when VAT applies). */
   lineAmountMajor: number | null;
@@ -65,12 +77,13 @@ function applyTemplate(
   });
 }
 
-/** Stripe charge/balance description for the Sales Receipt line. */
-function stripeDescriptionForSalesReceiptLine(
+/** Stripe charge/refund description for the QuickBooks line. */
+function stripeDescriptionForQuickBooksLine(
   transaction: Pick<
     StripeBalanceTransactionRecord,
     "description" | "stripeRaw" | "sku" | "productCode"
   >,
+  isRefund: boolean,
 ): string {
   const signals = extractStripeTransactionProductSignals({
     stripeRaw: transaction.stripeRaw,
@@ -82,7 +95,11 @@ function stripeDescriptionForSalesReceiptLine(
     signals.chargeDescription?.trim() ||
     signals.balanceDescription?.trim() ||
     transaction.description?.trim();
-  return fromStripe || transaction.productCode?.trim() || "Sale";
+  return (
+    fromStripe ||
+    transaction.productCode?.trim() ||
+    (isRefund ? "Refund" : "Sale")
+  );
 }
 
 export function planStripeQuickBooksPush(input: {
@@ -156,12 +173,20 @@ export function planStripeQuickBooksPush(input: {
     );
   }
 
+  const isRefund = isStripeRefundTransaction(input.transaction);
+
   const vatRatePercent = input.transaction.productVatRatePercent;
-  const amounts = stripeGrossToQuickBooksLineAmount({
-    grossMinor: input.transaction.amount,
-    currency: input.transaction.currency,
-    vatRatePercent,
-  });
+  const amounts = isRefund
+    ? stripeRefundGrossToQuickBooksLineAmount({
+        grossMinor: input.transaction.amount,
+        currency: input.transaction.currency,
+        vatRatePercent,
+      })
+    : stripeGrossToQuickBooksLineAmount({
+        grossMinor: input.transaction.amount,
+        currency: input.transaction.currency,
+        vatRatePercent,
+      });
 
   const taxResolved = resolveStripeQuickBooksPushTaxCode({
     productTaxCodeId: input.transaction.productQuickbooksTaxCodeId,
@@ -192,7 +217,10 @@ export function planStripeQuickBooksPush(input: {
     fee: minorUnitsToMajor(input.transaction.fee, input.transaction.currency),
   };
 
-  const lineDescription = stripeDescriptionForSalesReceiptLine(input.transaction);
+  const lineDescription = stripeDescriptionForQuickBooksLine(
+    input.transaction,
+    isRefund,
+  );
 
   const paymentRefTemplate =
     input.stripeQb?.quickbooksPaymentRefTemplate?.trim() ||
@@ -208,11 +236,16 @@ export function planStripeQuickBooksPush(input: {
       ? applyTemplate(customerMemoTemplate, templateVars).trim()
       : "");
 
-  const privateNote = defaultPrivateNoteForLotusPush(
-    input.transaction.id,
-    input.transaction.productCode,
-    input.transaction.productName,
-  );
+  const privateNote = isRefund
+    ? `Refund · ${lotusProductLabelForPrivateNote(
+        input.transaction.productCode,
+        input.transaction.productName,
+      )} | LL ${input.transaction.id}`
+    : defaultPrivateNoteForLotusPush(
+        input.transaction.id,
+        input.transaction.productCode,
+        input.transaction.productName,
+      );
 
   const lineDetail: QuickBooksSalesReceiptCreate["Line"][0]["SalesItemLineDetail"] =
     {
@@ -239,42 +272,36 @@ export function planStripeQuickBooksPush(input: {
     lineDetail.TaxCodeRef = { value: taxResolved.taxCodeId };
   }
 
-  const salesReceipt: QuickBooksSalesReceiptCreate = {
+  const sharedHeader: QuickBooksSalesReceiptCreate = {
     GlobalTaxCalculation: "TaxExcluded",
     TxnDate: txnDate,
-    TrackingNum: input.transaction.stripePaymentIntentId ?? undefined,
+    TrackingNum: stripeQuickBooksTrackingNum(input.transaction),
     PaymentRefNum: paymentRefNum || undefined,
     CustomerRef: customerId ? { value: customerId } : undefined,
     DepositToAccountRef: { value: depositAccountId ?? "" },
     PaymentMethodRef: paymentMethodId ? { value: paymentMethodId } : undefined,
     CustomerMemo: customerMemo ? { value: customerMemo } : undefined,
     BillEmail: memberEmail ? { Address: memberEmail } : undefined,
-    Line: [
-      {
-        DetailType: "SalesItemLineDetail",
-        Amount: amounts.lineAmountMajor,
-        Description: lineDescription,
-        SalesItemLineDetail: lineDetail,
-      },
-    ],
     PrivateNote: privateNote,
+    Line: [],
+  };
+
+  const line: QuickBooksSalesReceiptCreate["Line"][0] = {
+    DetailType: "SalesItemLineDetail",
+    Amount: amounts.lineAmountMajor,
+    Description: lineDescription,
+    SalesItemLineDetail: lineDetail,
   };
 
   if (input.qbItem?.quickbooksClassRef) {
-    salesReceipt.ClassRef = {
+    sharedHeader.ClassRef = {
       value: input.qbItem.quickbooksClassRef,
       name: input.qbItem.quickbooksClassName ?? undefined,
     };
   }
 
-  if (!input.transaction.stripePaymentIntentId) {
-    issues.push("No payment intent id — TrackingNum will be omitted");
-  }
-
   const ready = issues.length === 0 && pushCheck.ok;
-
-  return {
-    salesReceipt,
+  const sharedResult = {
     grossAmountMajor: amounts.grossMajor,
     lineAmountMajor: amounts.lineAmountMajor,
     vatRatePercent,
@@ -283,6 +310,32 @@ export function planStripeQuickBooksPush(input: {
     taxCodeSource: taxResolved.source,
     issues,
     ready,
+  };
+
+  if (isRefund) {
+    const { Line: _line, ...refundHeader } = sharedHeader;
+    const refundReceipt: QuickBooksRefundReceiptCreate = {
+      ...refundHeader,
+      Line: [line],
+    };
+    return {
+      documentKind: "refund_receipt",
+      salesReceipt: null,
+      refundReceipt,
+      ...sharedResult,
+    };
+  }
+
+  const salesReceipt: QuickBooksSalesReceiptCreate = {
+    ...sharedHeader,
+    Line: [line],
+  };
+
+  return {
+    documentKind: "sales_receipt",
+    salesReceipt,
+    refundReceipt: null,
+    ...sharedResult,
   };
 }
 
@@ -318,22 +371,25 @@ export async function planStripeQuickBooksPushForTransaction(input: {
     qbItem,
   });
 
-  const salesReceipt = plan.salesReceipt;
-  if (!salesReceipt) return plan;
+  const qbDocument =
+    plan.documentKind === "refund_receipt"
+      ? plan.refundReceipt
+      : plan.salesReceipt;
+  if (!qbDocument) return plan;
 
   if (plan.taxCodeId) {
     const match = taxCodes.find((t) => t.quickbooksId === plan.taxCodeId);
-    if (match && salesReceipt.Line[0]?.SalesItemLineDetail.TaxCodeRef) {
-      salesReceipt.Line[0].SalesItemLineDetail.TaxCodeRef.name = match.name;
+    if (match && qbDocument.Line[0]?.SalesItemLineDetail.TaxCodeRef) {
+      qbDocument.Line[0].SalesItemLineDetail.TaxCodeRef.name = match.name;
     }
   }
 
-  if (plan.salesReceipt?.PaymentMethodRef?.value) {
+  if (qbDocument.PaymentMethodRef?.value) {
     const pm = paymentMethods.find(
-      (p) => p.quickbooksId === plan.salesReceipt!.PaymentMethodRef!.value,
+      (p) => p.quickbooksId === qbDocument.PaymentMethodRef!.value,
     );
     if (pm) {
-      plan.salesReceipt.PaymentMethodRef.name = pm.name;
+      qbDocument.PaymentMethodRef.name = pm.name;
     }
   }
 

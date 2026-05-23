@@ -39,3 +39,18 @@ export function stripeGrossToQuickBooksLineAmount(input: {
     vatRatePercent: vatRate,
   };
 }
+
+/**
+ * Refund balance transactions store negative gross in Stripe.
+ * QuickBooks Refund Receipt lines use positive major-unit amounts.
+ */
+export function stripeRefundGrossToQuickBooksLineAmount(input: {
+  grossMinor: number;
+  currency: string;
+  vatRatePercent: number;
+}): ReturnType<typeof stripeGrossToQuickBooksLineAmount> {
+  return stripeGrossToQuickBooksLineAmount({
+    ...input,
+    grossMinor: Math.abs(input.grossMinor),
+  });
+}

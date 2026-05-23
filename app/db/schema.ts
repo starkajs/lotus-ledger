@@ -206,6 +206,8 @@ export const stripeBalanceTransactions = pgTable(
     quickbooksPushedAt: timestamp("quickbooks_pushed_at", { withTimezone: true }),
     /** QuickBooks Sales Receipt entity Id (`SalesReceipt.Id`) after LL push — reconcile link. */
     quickbooksSalesReceiptId: text("quickbooks_sales_receipt_id"),
+    /** QuickBooks Refund Receipt entity Id (`RefundReceipt.Id`) after LL push. */
+    quickbooksRefundReceiptId: text("quickbooks_refund_receipt_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -218,6 +220,9 @@ export const stripeBalanceTransactions = pgTable(
     index("stripe_balance_transactions_wc_order_id_idx").on(table.wcOrderId),
     index("stripe_balance_transactions_qb_sales_receipt_id_idx").on(
       table.quickbooksSalesReceiptId,
+    ),
+    index("stripe_balance_transactions_qb_refund_receipt_id_idx").on(
+      table.quickbooksRefundReceiptId,
     ),
   ],
 );
@@ -395,6 +400,54 @@ export const quickbooksSalesReceipts = pgTable(
   },
   (table) => [
     unique("qb_sales_receipts_realm_qb_id_unique").on(
+      table.realmId,
+      table.quickbooksId,
+    ),
+  ],
+);
+
+/** QuickBooks Refund Receipt transactions synced for reconciliation / reporting. */
+export const quickbooksRefundReceipts = pgTable(
+  "quickbooks_refund_receipts",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    realmId: text("realm_id").notNull(),
+    quickbooksId: text("quickbooks_id").notNull(),
+    docNumber: text("doc_number"),
+    txnDate: date("txn_date"),
+    trackingNum: text("tracking_num"),
+    customerQuickbooksId: text("customer_quickbooks_id"),
+    customerName: text("customer_name"),
+    customerMemo: text("customer_memo"),
+    billEmail: text("bill_email"),
+    shipAddrSummary: text("ship_addr_summary"),
+    classRefId: text("class_ref_id"),
+    classRefName: text("class_ref_name"),
+    departmentRefId: text("department_ref_id"),
+    departmentRefName: text("department_ref_name"),
+    totalAmt: text("total_amt").notNull(),
+    totalTax: text("total_tax"),
+    currencyCode: text("currency_code"),
+    currencyName: text("currency_name"),
+    paymentMethod: text("payment_method"),
+    depositToAccountRef: text("deposit_to_account_ref"),
+    privateNote: text("private_note"),
+    syncToken: text("sync_token"),
+    qbCreatedAt: timestamp("qb_created_at", { withTimezone: true }),
+    qbUpdatedAt: timestamp("qb_updated_at", { withTimezone: true }),
+    lineCount: integer("line_count"),
+    lineSummary: text("line_summary"),
+    lineItems: jsonb("line_items"),
+    quickbooksRaw: jsonb("quickbooks_raw").$type<Record<string, unknown>>(),
+    qbStatus: text("qb_status").notNull().default("active"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    deletedInQbAt: timestamp("deleted_in_qb_at", { withTimezone: true }),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("qb_refund_receipts_realm_qb_id_unique").on(
       table.realmId,
       table.quickbooksId,
     ),

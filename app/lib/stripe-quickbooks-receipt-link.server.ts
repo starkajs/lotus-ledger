@@ -14,6 +14,7 @@ import { isStripeQuickbooksNa } from "~/lib/stripe-quickbooks.constants";
 
 export type StripeReceiptMatchStripe = {
   id: string;
+  stripeBalanceTransactionId: string;
   stripePaymentIntentId: string | null;
   quickbooksSalesReceiptId: string | null;
   stripeCreatedAt: Date | string;
@@ -23,6 +24,14 @@ export type StripeReceiptMatchReceipt = {
   quickbooksId: string;
   trackingNum: string | null;
 };
+
+/** Value stored in QuickBooks `TrackingNum` when pushing / matching. */
+export function stripeQuickBooksTrackingNum(stripe: {
+  stripePaymentIntentId: string | null;
+  stripeBalanceTransactionId: string;
+}): string {
+  return stripe.stripePaymentIntentId ?? stripe.stripeBalanceTransactionId;
+}
 
 export function stripeTransactionMatchesQuickBooksReceipt(
   stripe: StripeReceiptMatchStripe,
@@ -34,11 +43,8 @@ export function stripeTransactionMatchesQuickBooksReceipt(
   ) {
     return true;
   }
-  if (
-    stripe.stripePaymentIntentId &&
-    receipt.trackingNum &&
-    stripe.stripePaymentIntentId === receipt.trackingNum
-  ) {
+  const trackingRef = stripeQuickBooksTrackingNum(stripe);
+  if (receipt.trackingNum && trackingRef === receipt.trackingNum) {
     return true;
   }
   return false;
@@ -55,10 +61,9 @@ export function findQuickBooksSalesReceiptForStripe<
     const linked = byQuickbooksId.get(stripe.quickbooksSalesReceiptId);
     if (linked) return linked;
   }
-  if (stripe.stripePaymentIntentId) {
-    const linked = byTrackingNum.get(stripe.stripePaymentIntentId);
-    if (linked) return linked;
-  }
+  const trackingRef = stripeQuickBooksTrackingNum(stripe);
+  const linked = byTrackingNum.get(trackingRef);
+  if (linked) return linked;
   return null;
 }
 
@@ -112,6 +117,8 @@ export async function linkStripeTransactionsToQuickBooksSalesReceipts(input: {
   const stripeRows = await db
     .select({
       id: stripeBalanceTransactions.id,
+      stripeBalanceTransactionId:
+        stripeBalanceTransactions.stripeBalanceTransactionId,
       stripePaymentIntentId: stripeBalanceTransactions.stripePaymentIntentId,
       quickbooksSalesReceiptId:
         stripeBalanceTransactions.quickbooksSalesReceiptId,

@@ -13,6 +13,7 @@ import {
 } from "~/lib/product-classification.server";
 import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
 import { getProductMatchRuleById, listProducts } from "~/lib/products.server";
+import { getQuickBooksRefundReceiptByQuickbooksId } from "~/lib/quickbooks-refund-receipts.server";
 import { getQuickBooksSalesReceiptByQuickbooksId } from "~/lib/quickbooks-sales-receipts.server";
 import { getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
 import { clearStripeTransactionQuickBooksPush } from "~/lib/stripe-quickbooks-push-execute.server";
@@ -147,8 +148,26 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     docNumber: string | null;
     txnDate: string | null;
   } | null = null;
+  let linkedQuickBooksRefundReceipt: {
+    lotusId: string;
+    docNumber: string | null;
+    txnDate: string | null;
+  } | null = null;
+  const tokens = await getQuickBooksTokens();
+  if (tx.quickbooksRefundReceiptId) {
+    const receipt = await getQuickBooksRefundReceiptByQuickbooksId(
+      tx.quickbooksRefundReceiptId,
+      tokens?.realmId,
+    );
+    if (receipt) {
+      linkedQuickBooksRefundReceipt = {
+        lotusId: receipt.id,
+        docNumber: receipt.docNumber,
+        txnDate: receipt.txnDate,
+      };
+    }
+  }
   if (tx.quickbooksSalesReceiptId) {
-    const tokens = await getQuickBooksTokens();
     const receipt = await getQuickBooksSalesReceiptByQuickbooksId(
       tx.quickbooksSalesReceiptId,
       tokens?.realmId,
@@ -165,6 +184,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return {
     tx,
     linkedQuickBooksSalesReceipt,
+    linkedQuickBooksRefundReceipt,
     products,
     productSignals,
     matchedRule,
@@ -268,6 +288,7 @@ export default function StripeTransactionDetailPage({
     wcLotusProductForCopy,
     stripeUnmatched,
     linkedQuickBooksSalesReceipt,
+    linkedQuickBooksRefundReceipt,
   } = loaderData;
   const location = useLocation();
   const postAction = location.pathname + location.search;
@@ -458,7 +479,11 @@ export default function StripeTransactionDetailPage({
             to={`/integrations/stripe/transactions/quickbooks-push?preview=${tx.id}`}
             className="text-teal hover:underline"
           >
-            Preview Sales Receipt JSON
+            Preview{" "}
+            {pushPlan.documentKind === "refund_receipt"
+              ? "Refund Receipt"
+              : "Sales Receipt"}{" "}
+            JSON
           </Link>
         </p>
       </div>
@@ -603,7 +628,9 @@ export default function StripeTransactionDetailPage({
               ) : (
                 "Not pushed"
               )}
-              {tx.pushedToQuickbooks === true || tx.quickbooksSalesReceiptId ? (
+              {tx.pushedToQuickbooks === true ||
+              tx.quickbooksSalesReceiptId ||
+              tx.quickbooksRefundReceiptId ? (
                 <Form method="post" action={postAction} className="inline">
                   <input type="hidden" name="returnTo" value={returnTo} />
                   <SubmitButton
@@ -618,6 +645,32 @@ export default function StripeTransactionDetailPage({
               ) : null}
             </div>
           </DetailRow>
+          {tx.quickbooksRefundReceiptId ? (
+            <DetailRow label="QB refund receipt">
+              <span className="font-mono text-xs">
+                {tx.quickbooksRefundReceiptId}
+              </span>
+              {linkedQuickBooksRefundReceipt ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <Link
+                    to={`/integrations/quickbooks/refund-receipts/${linkedQuickBooksRefundReceipt.lotusId}`}
+                    className="text-teal-dark underline"
+                  >
+                    {linkedQuickBooksRefundReceipt.docNumber
+                      ? `Receipt ${linkedQuickBooksRefundReceipt.docNumber}`
+                      : "View in Lotus"}
+                  </Link>
+                </>
+              ) : (
+                <span className="text-ink-faint">
+                  {" "}
+                  · not synced to Lotus yet — refresh Refund receipts
+                </span>
+              )}
+            </DetailRow>
+          ) : null}
           {tx.quickbooksSalesReceiptId ? (
             <DetailRow label="QB sales receipt">
               <span className="font-mono text-xs">

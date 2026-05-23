@@ -45,8 +45,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     if (tx) {
       previewTxnId = tx.id;
       previewPushed =
-        tx.pushedToQuickbooks === true || Boolean(tx.quickbooksSalesReceiptId);
-      previewQuickbooksSalesReceiptId = tx.quickbooksSalesReceiptId;
+        tx.pushedToQuickbooks === true ||
+        Boolean(tx.quickbooksSalesReceiptId) ||
+        Boolean(tx.quickbooksRefundReceiptId);
+      previewQuickbooksSalesReceiptId =
+        tx.quickbooksSalesReceiptId ?? tx.quickbooksRefundReceiptId;
       previewPlan = await planStripeQuickBooksPushForTransaction({
         transaction: tx,
       });
@@ -90,7 +93,9 @@ export async function action({ request }: Route.ActionArgs) {
         plan: result.plan,
         api: result.api,
         salesReceiptId: result.salesReceiptId,
+        refundReceiptId: result.refundReceiptId,
         lotusSalesReceiptId: result.lotusSalesReceiptId,
+        lotusRefundReceiptId: result.lotusRefundReceiptId,
       };
     } catch (err) {
       return {
@@ -141,7 +146,7 @@ export default function StripeQuickBooksPushPage({
   return (
     <AppPage
       title="QuickBooks push"
-      description="Preview and test pushing Stripe transactions to QuickBooks Sales Receipts using Stripe account mapping and Lotus product details."
+      description="Preview and test pushing Stripe transactions to QuickBooks Sales Receipts or Refund Receipts using Stripe account mapping and Lotus product details."
       maxWidth="full"
       actions={
         <div className="flex flex-wrap gap-2">
@@ -216,7 +221,11 @@ export default function StripeQuickBooksPushPage({
               </span>
               <span className="text-ink-muted">
                 {" "}
-                · Stripe account + product mapping
+              {previewPlan.documentKind === "refund_receipt"
+                ? "Refund Receipt"
+                : "Sales Receipt"}
+              {" · "}
+              Stripe account + product mapping
               </span>
               {previewPlan.vatRatePercent > 0 && (
                 <span className="text-ink-muted">
@@ -252,19 +261,30 @@ export default function StripeQuickBooksPushPage({
                 ))}
               </ul>
             )}
-            {previewPlan.salesReceipt && (
+            {(previewPlan.salesReceipt || previewPlan.refundReceipt) && (
               <>
                 <h3 className="text-xs font-medium text-ink-muted">
-                  Request body (POST salesreceipt)
+                  Request body (POST{" "}
+                  {previewPlan.documentKind === "refund_receipt"
+                    ? "refundreceipt"
+                    : "salesreceipt"}
+                  )
                 </h3>
                 <pre className="overflow-x-auto rounded-jamyang border border-sand-dark/40 bg-surface p-3 text-[11px] font-mono text-dark">
-                  {JSON.stringify(previewPlan.salesReceipt, null, 2)}
+                  {JSON.stringify(
+                    previewPlan.refundReceipt ?? previewPlan.salesReceipt,
+                    null,
+                    2,
+                  )}
                 </pre>
               </>
             )}
             {previewPushed && previewQuickbooksSalesReceiptId && (
               <p className="text-sm text-amber-800">
-                Already pushed (QB receipt{" "}
+                Already pushed (QB{" "}
+                {previewPlan.documentKind === "refund_receipt"
+                  ? "refund receipt"
+                  : "sales receipt"}{" "}
                 <span className="font-mono text-xs">
                   {previewQuickbooksSalesReceiptId}
                 </span>
@@ -317,7 +337,8 @@ export default function StripeQuickBooksPushPage({
                 )}
               </div>
             )}
-            {!qbConnected && previewPlan.salesReceipt && (
+            {!qbConnected &&
+              (previewPlan.salesReceipt || previewPlan.refundReceipt) && (
               <p className="text-sm text-maroon">
                 Connect QuickBooks to push this receipt.
               </p>
@@ -346,23 +367,44 @@ export default function StripeQuickBooksPushPage({
                         }
                       >
                         {actionData.api.ok ? (
-                          <>
-                            Created Sales Receipt{" "}
-                            {actionData.salesReceiptId ??
-                              actionData.api.salesReceipt.Id}
-                            {actionData.lotusSalesReceiptId ? (
-                              <>
-                                {" "}
-                                ·{" "}
-                                <Link
-                                  to={`/integrations/quickbooks/sales-receipts/${actionData.lotusSalesReceiptId}`}
-                                  className="text-teal underline"
-                                >
-                                  View in Lotus
-                                </Link>
-                              </>
-                            ) : null}
-                          </>
+                          actionData.refundReceiptId ? (
+                            <>
+                              Created Refund Receipt{" "}
+                              {actionData.refundReceiptId}
+                              {actionData.lotusRefundReceiptId ? (
+                                <>
+                                  {" "}
+                                  ·{" "}
+                                  <Link
+                                    to={`/integrations/quickbooks/refund-receipts/${actionData.lotusRefundReceiptId}`}
+                                    className="text-teal underline"
+                                  >
+                                    View in Lotus
+                                  </Link>
+                                </>
+                              ) : null}
+                            </>
+                          ) : (
+                            <>
+                              Created Sales Receipt{" "}
+                              {actionData.salesReceiptId ??
+                                ("salesReceipt" in actionData.api
+                                  ? actionData.api.salesReceipt.Id
+                                  : "")}
+                              {actionData.lotusSalesReceiptId ? (
+                                <>
+                                  {" "}
+                                  ·{" "}
+                                  <Link
+                                    to={`/integrations/quickbooks/sales-receipts/${actionData.lotusSalesReceiptId}`}
+                                    className="text-teal underline"
+                                  >
+                                    View in Lotus
+                                  </Link>
+                                </>
+                              ) : null}
+                            </>
+                          )
                         ) : (
                           actionData.api.message
                         )}

@@ -80,6 +80,8 @@ export type StripeBalanceTransactionRecord = {
   quickbooksPushedAt: string | null;
   /** QuickBooks Sales Receipt `Id` after push (links to `quickbooks_sales_receipts.quickbooks_id`). */
   quickbooksSalesReceiptId: string | null;
+  /** QuickBooks Refund Receipt `Id` after push. */
+  quickbooksRefundReceiptId: string | null;
   /** Set when a synced WC order matches order_key and/or WC order id. */
   linkedWcOrderId: string | null;
   linkedWcOrderNumber: string | null;
@@ -233,6 +235,7 @@ function rowToRecord(
     pushedToQuickbooks: row.pushedToQuickbooks,
     quickbooksPushedAt: row.quickbooksPushedAt?.toISOString() ?? null,
     quickbooksSalesReceiptId: row.quickbooksSalesReceiptId,
+    quickbooksRefundReceiptId: row.quickbooksRefundReceiptId,
     linkedWcOrderId: linkedWc?.id ?? null,
     linkedWcOrderNumber: linkedWc?.orderNumber ?? null,
     linkedWcWcOrderId: linkedWc?.wcOrderId ?? null,
@@ -958,6 +961,24 @@ export async function getStripeBalanceTransactionByPreviewRef(
   return null;
 }
 
+/** Persist QuickBooks `RefundReceipt.Id` after a successful refund push. */
+export async function setStripeBalanceTransactionQuickBooksRefundReceipt(
+  lotusTransactionId: string,
+  quickbooksRefundReceiptId: string,
+): Promise<void> {
+  const db = getDb();
+  const now = new Date();
+  await db
+    .update(stripeBalanceTransactions)
+    .set({
+      quickbooksRefundReceiptId,
+      pushedToQuickbooks: true,
+      quickbooksPushedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(stripeBalanceTransactions.id, lotusTransactionId));
+}
+
 /** Persist QuickBooks `SalesReceipt.Id` after a successful push. */
 export async function setStripeBalanceTransactionQuickBooksSalesReceipt(
   lotusTransactionId: string,
@@ -985,6 +1006,7 @@ export async function clearStripeBalanceTransactionQuickBooksPush(
     .select({
       pushedToQuickbooks: stripeBalanceTransactions.pushedToQuickbooks,
       quickbooksSalesReceiptId: stripeBalanceTransactions.quickbooksSalesReceiptId,
+      quickbooksRefundReceiptId: stripeBalanceTransactions.quickbooksRefundReceiptId,
     })
     .from(stripeBalanceTransactions)
     .where(eq(stripeBalanceTransactions.id, lotusTransactionId))
@@ -993,7 +1015,11 @@ export async function clearStripeBalanceTransactionQuickBooksPush(
   if (!row) {
     return { ok: false, reason: "Transaction not found" };
   }
-  if (row.pushedToQuickbooks !== true && !row.quickbooksSalesReceiptId) {
+  if (
+    row.pushedToQuickbooks !== true &&
+    !row.quickbooksSalesReceiptId &&
+    !row.quickbooksRefundReceiptId
+  ) {
     return { ok: false, reason: "Transaction is not marked as pushed to QuickBooks" };
   }
 
@@ -1002,6 +1028,7 @@ export async function clearStripeBalanceTransactionQuickBooksPush(
     .update(stripeBalanceTransactions)
     .set({
       quickbooksSalesReceiptId: null,
+      quickbooksRefundReceiptId: null,
       pushedToQuickbooks: false,
       quickbooksPushedAt: null,
       updatedAt: now,
