@@ -107,6 +107,8 @@ export default function StripeTransactionsSummaryPage({
     dateFrom,
     dateTo,
     period,
+    wcOrderSearch,
+    wcLinked,
   } = loaderData;
 
   const listFilters: StripeTransactionListFilters = {
@@ -116,6 +118,8 @@ export default function StripeTransactionsSummaryPage({
     dateFrom,
     dateTo,
     period,
+    wcOrderSearch,
+    wcLinked,
   };
 
   const transactionsListHref = stripeTransactionsHref(
@@ -180,6 +184,8 @@ export default function StripeTransactionsSummaryPage({
             dateFrom={dateFrom}
             dateTo={dateTo}
             period={period}
+            wcOrderSearch={wcOrderSearch}
+            wcLinked={wcLinked}
             action={SUMMARY_PATH}
           />
           <StripeTransactionsFilterSummary
@@ -187,6 +193,8 @@ export default function StripeTransactionsSummaryPage({
             dateTo={dateTo}
             period={period}
             product={product}
+            wcOrderSearch={wcOrderSearch}
+            wcLinked={wcLinked}
           />
 
           <p className="mt-3 text-xs text-ink-muted">

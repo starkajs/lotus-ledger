@@ -21,6 +21,8 @@ export type StripeTransactionListFilters = {
   dateFrom: string | null;
   dateTo: string | null;
   period: DatePeriodPreset | null;
+  wcOrderSearch: string;
+  wcLinked: "all" | "linked" | "not_linked";
 };
 
 export function appendStripeTransactionDateFilters(
@@ -46,6 +48,10 @@ export function buildStripeTransactionsSearchParams(
   if (filters.account) params.set("account", filters.account);
   if (filters.pushed !== "all") params.set("pushed", filters.pushed);
   if (filters.product !== "all") params.set("product", filters.product);
+  if (filters.wcOrderSearch.trim()) {
+    params.set("wcOrder", filters.wcOrderSearch.trim());
+  }
+  if (filters.wcLinked !== "all") params.set("wcLinked", filters.wcLinked);
   appendStripeTransactionDateFilters(params, filters);
   if (page != null && page > 1) params.set("page", String(page));
   return params;
@@ -82,6 +88,13 @@ export function parseStripeTransactionFiltersFromUrl(
     (STRIPE_PRODUCT_MATCH_STATUSES as readonly string[]).includes(productRaw)
       ? (productRaw as StripeProductMatchFilter)
       : "all";
+  const wcOrderSearch = params.get("wcOrder")?.trim() ?? "";
+  const wcLinkedRaw = params.get("wcLinked");
+  const wcLinked: StripeTransactionListFilters["wcLinked"] =
+    wcLinkedRaw === "linked" || wcLinkedRaw === "not_linked"
+      ? wcLinkedRaw
+      : "all";
+
   return {
     account,
     pushed,
@@ -89,6 +102,8 @@ export function parseStripeTransactionFiltersFromUrl(
     dateFrom,
     dateTo,
     period,
+    wcOrderSearch,
+    wcLinked,
   };
 }
 
@@ -103,6 +118,8 @@ export function toListStripeBalanceTransactionOptions(
     productMatch: filters.product,
     dateFrom: filters.dateFrom,
     dateTo: filters.dateTo,
+    wcOrderSearch: filters.wcOrderSearch || undefined,
+    wcLinked: filters.wcLinked,
     page,
     pageSize,
   };

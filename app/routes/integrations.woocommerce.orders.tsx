@@ -4,12 +4,13 @@ import type { Route } from "./+types/integrations.woocommerce.orders";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
 import { formatWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
-import { formatCalendarDateShort, resolveOrderDateFilters } from "~/lib/date-range-filters";
+import { formatCalendarDateShort } from "~/lib/date-range-filters";
 import {
   WooCommerceOrdersFilterForm,
   WooCommerceOrdersFilterSummary,
 } from "~/components/woocommerce-orders-filter-form";
 import {
+  parseWooCommerceOrderFiltersFromUrl,
   wooCommerceOrdersHref,
   type WooCommerceOrderListFilters,
 } from "~/lib/woocommerce-orders-filters";
@@ -36,6 +37,49 @@ const SUMMARY_PATH = "/integrations/woocommerce/orders/summary";
 function orderDetailHref(orderId: string, returnTo: string) {
   const params = new URLSearchParams({ returnTo });
   return `/integrations/woocommerce/orders/${orderId}?${params}`;
+}
+
+function stripeTransactionHref(transactionId: string, returnTo: string) {
+  const params = new URLSearchParams({ returnTo });
+  return `/integrations/stripe/transactions/${transactionId}?${params}`;
+}
+
+function StripeCell({
+  order,
+  returnTo,
+}: {
+  order: WooCommerceOrderRecord;
+  returnTo: string;
+}) {
+  const linked = order.linkedStripeTransactions;
+  if (linked.length > 0) {
+    const primary = linked[0]!;
+    return (
+      <div>
+        <Link
+          to={stripeTransactionHref(primary.id, returnTo)}
+          className="font-mono text-[10px] text-teal hover:underline"
+          title={primary.stripeBalanceTransactionId}
+        >
+          {primary.stripeBalanceTransactionId.slice(0, 14)}…
+        </Link>
+        <span className="mt-0.5 block text-[10px] font-medium text-jade">
+          Linked{linked.length > 1 ? ` (+${linked.length - 1})` : ""}
+        </span>
+      </div>
+    );
+  }
+  if (order.orderKey) {
+    return (
+      <div className="max-w-[9rem]" title={order.orderKey}>
+        <span className="text-[10px] text-ink-faint">No Stripe match</span>
+        <span className="block truncate font-mono text-[10px] text-ink-muted">
+          {order.orderKey}
+        </span>
+      </div>
+    );
+  }
+  return <span className="text-ink-faint">—</span>;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -89,7 +133,7 @@ function OrderLinesRow({ order }: { order: WooCommerceOrderRecord }) {
     return (
       <tr className="group border-b border-sand-dark/30 hover:bg-sand/20">
         <td className="px-2 pb-1.5 pt-0" />
-        <td colSpan={8} className="px-2 pb-2 pt-0 text-[10px] text-ink-muted">
+        <td colSpan={9} className="px-2 pb-2 pt-0 text-[10px] text-ink-muted">
           <span className="text-ink-faint">Lines: </span>
           {order.lineSummary}
         </td>
@@ -103,7 +147,7 @@ function OrderLinesRow({ order }: { order: WooCommerceOrderRecord }) {
   return (
     <tr className="group border-b border-sand-dark/30 hover:bg-sand/20">
       <td className="px-2 pb-1.5 pt-0" />
-      <td colSpan={8} className="px-2 pb-2 pt-0 text-[10px] text-ink-muted">
+      <td colSpan={9} className="px-2 pb-2 pt-0 text-[10px] text-ink-muted">
         <span className="text-ink-faint">Lines: </span>
         {visible.map((item, index) => (
           <span key={item.id}>
@@ -161,37 +205,31 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   const url = new URL(request.url);
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
-  const statusRaw = url.searchParams.get("status")?.trim() ?? "all";
-  const { dateFrom, dateTo, period } = resolveOrderDateFilters({
-    period: url.searchParams.get("period"),
-    from: url.searchParams.get("from"),
-    to: url.searchParams.get("to"),
-  });
-  const lotusProductMissing = url.searchParams.get("lotusMissing") === "yes";
+  const parsed = parseWooCommerceOrderFiltersFromUrl(url.searchParams);
 
   const [list, statuses] = await Promise.all([
     listWooCommerceOrdersFromDb({
       page,
-      status: statusRaw,
-      dateFrom,
-      dateTo,
-      lotusProductMissing,
+      status: parsed.status,
+      dateFrom: parsed.dateFrom,
+      dateTo: parsed.dateTo,
+      lotusProductMissing: parsed.lotusProductMissing,
+      stripeSearch: parsed.stripeSearch,
+      stripeLinked: parsed.stripeLinked,
     }),
     listDistinctWooCommerceOrderStatuses(),
   ]);
 
-  const status = statuses.includes(statusRaw) || statusRaw === "all"
-    ? statusRaw
-    : "all";
+  const status =
+    statuses.includes(parsed.status) || parsed.status === "all"
+      ? parsed.status
+      : "all";
 
   return {
     ...list,
-    status,
     statuses,
-    dateFrom,
-    dateTo,
-    period,
-    lotusProductMissing,
+    ...parsed,
+    status,
   };
 }
 
@@ -237,6 +275,8 @@ export default function WooCommerceOrdersPage({
     dateTo,
     period,
     lotusProductMissing,
+    stripeSearch,
+    stripeLinked,
   } = loaderData;
 
   const listFilters: WooCommerceOrderListFilters = {
@@ -245,7 +285,18 @@ export default function WooCommerceOrdersPage({
     dateTo,
     period,
     lotusProductMissing,
+    stripeSearch,
+    stripeLinked,
   };
+
+  const hasFilters =
+    status !== "all" ||
+    lotusProductMissing ||
+    dateFrom != null ||
+    dateTo != null ||
+    period != null ||
+    stripeSearch.length > 0 ||
+    stripeLinked !== "all";
 
   const summaryHref = wooCommerceOrdersHref(SUMMARY_PATH, listFilters);
 
@@ -339,13 +390,28 @@ export default function WooCommerceOrdersPage({
             dateTo={dateTo}
             period={period}
             lotusProductMissing={lotusProductMissing}
+            stripeSearch={stripeSearch}
+            stripeLinked={stripeLinked}
           />
           <WooCommerceOrdersFilterSummary
             dateFrom={dateFrom}
             dateTo={dateTo}
             period={period}
             lotusProductMissing={lotusProductMissing}
+            stripeSearch={stripeSearch}
+            stripeLinked={stripeLinked}
           />
+
+          {hasFilters && (
+            <p className="mt-2">
+              <Link
+                to={ORDERS_PATH}
+                className="text-xs text-ink-muted hover:text-teal hover:underline"
+              >
+                Clear filters
+              </Link>
+            </p>
+          )}
 
           <p className="mt-3 text-xs text-ink-muted">
             {total === 0
@@ -367,11 +433,12 @@ export default function WooCommerceOrdersPage({
           ) : (
             <>
               <div className="mt-3 overflow-x-auto rounded-jamyang border border-sand-dark/50">
-                <table className="w-full min-w-[48rem] text-left text-xs">
+                <table className="w-full min-w-[54rem] text-left text-xs">
                   <thead className="bg-surface text-dark">
                     <tr>
                       <th className="px-2 py-1.5 font-medium">Date</th>
                       <th className="px-2 py-1.5 font-medium">Order</th>
+                      <th className="px-2 py-1.5 font-medium">Stripe</th>
                       <th className="px-2 py-1.5 font-medium">Status</th>
                       <th className="px-2 py-1.5 font-medium">Customer</th>
                       <th className="px-2 py-1.5 font-medium">Lotus product</th>
@@ -400,14 +467,17 @@ export default function WooCommerceOrdersPage({
                             >
                               wc:{order.wcOrderId}
                             </div>
-                            {order.transactionId && (
+                            {order.orderKey && (
                               <div
                                 className="max-w-[10rem] truncate font-mono text-[10px] text-ink-faint"
-                                title={order.transactionId}
+                                title={order.orderKey}
                               >
-                                {order.transactionId}
+                                {order.orderKey}
                               </div>
                             )}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <StripeCell order={order} returnTo={returnTo} />
                           </td>
                           <td className="px-2 py-1.5">
                             <StatusBadge status={order.status} />

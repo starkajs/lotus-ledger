@@ -99,6 +99,46 @@ function transactionDetailHref(transactionId: string, returnTo: string) {
   return `/integrations/stripe/transactions/${transactionId}?${params}`;
 }
 
+function wcOrderHref(orderId: string, returnTo: string) {
+  const params = new URLSearchParams({ returnTo });
+  return `/integrations/woocommerce/orders/${orderId}?${params}`;
+}
+
+function WcOrderCell({
+  tx,
+  returnTo,
+}: {
+  tx: StripeBalanceTransactionRecord;
+  returnTo: string;
+}) {
+  if (tx.linkedWcOrderId) {
+    return (
+      <div>
+        <Link
+          to={wcOrderHref(tx.linkedWcOrderId, returnTo)}
+          className="font-medium text-teal hover:underline"
+        >
+          #{tx.linkedWcOrderNumber ?? tx.linkedWcWcOrderId}
+        </Link>
+        <span className="mt-0.5 block text-[10px] font-medium text-jade">
+          Linked
+        </span>
+      </div>
+    );
+  }
+  if (tx.orderKey) {
+    return (
+      <div className="max-w-[9rem]" title={tx.orderKey}>
+        <span className="text-[10px] text-ink-faint">No WC match</span>
+        <span className="block truncate font-mono text-[10px] text-ink-muted">
+          {tx.orderKey}
+        </span>
+      </div>
+    );
+  }
+  return <span className="text-ink-faint">—</span>;
+}
+
 type StripeTextHintField = { label: string; value: string };
 
 function getStripeTextHintFields(
@@ -228,6 +268,8 @@ export default function StripeTransactionsPage({
     dateFrom,
     dateTo,
     period,
+    wcOrderSearch,
+    wcLinked,
   } = loaderData;
   const location = useLocation();
 
@@ -238,13 +280,17 @@ export default function StripeTransactionsPage({
     dateFrom,
     dateTo,
     period,
+    wcOrderSearch,
+    wcLinked,
   };
   const hasFilters =
     pushed !== "all" ||
     product !== "all" ||
     dateFrom != null ||
     dateTo != null ||
-    period != null;
+    period != null ||
+    wcOrderSearch.length > 0 ||
+    wcLinked !== "all";
   const unmatchedOnly = product === "unmatched";
   const summaryHref = stripeTransactionsHref(SUMMARY_PATH, listFilters);
 
@@ -428,12 +474,16 @@ export default function StripeTransactionsPage({
             dateFrom={dateFrom}
             dateTo={dateTo}
             period={period}
+            wcOrderSearch={wcOrderSearch}
+            wcLinked={wcLinked}
           />
           <StripeTransactionsFilterSummary
             dateFrom={dateFrom}
             dateTo={dateTo}
             period={period}
             product={product}
+            wcOrderSearch={wcOrderSearch}
+            wcLinked={wcLinked}
           />
 
           <div className="mt-2 flex flex-wrap gap-2">
@@ -461,6 +511,8 @@ export default function StripeTransactionsPage({
                   dateFrom: null,
                   dateTo: null,
                   period: null,
+                  wcOrderSearch: "",
+                  wcLinked: "all",
                 })}
                 className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1.5 text-sm text-ink-muted hover:bg-surface"
               >
@@ -496,7 +548,7 @@ export default function StripeTransactionsPage({
           ) : (
             <>
               <div className="mt-3 overflow-x-auto rounded-jamyang border border-sand-dark/50">
-                <table className="w-full min-w-[52rem] text-left text-xs">
+                <table className="w-full min-w-[58rem] text-left text-xs">
                   <thead className="bg-surface text-dark">
                     <tr>
                       <th className="px-2 py-1.5 font-medium">Date</th>
@@ -504,6 +556,7 @@ export default function StripeTransactionsPage({
                         <th className="px-2 py-1.5 font-medium">Account</th>
                       )}
                       <th className="px-2 py-1.5 font-medium">Transaction</th>
+                      <th className="px-2 py-1.5 font-medium">WC order</th>
                       <th className="px-2 py-1.5 font-medium">Customer</th>
                       <th className="px-2 py-1.5 font-medium">Product</th>
                       <th className="px-2 py-1.5 font-medium">CCY</th>
@@ -552,6 +605,9 @@ export default function StripeTransactionsPage({
                               )}
                             </td>
                             <td className="px-2 py-1.5">
+                              <WcOrderCell tx={tx} returnTo={returnTo} />
+                            </td>
+                            <td className="px-2 py-1.5">
                               <MemberCell tx={tx} />
                             </td>
                             <td className="px-2 py-1.5">
@@ -590,6 +646,7 @@ export default function StripeTransactionsPage({
                               <td className="px-2 pb-2 pt-0 align-top">
                                 <StripeTextHints fields={hintFields} />
                               </td>
+                              <td className="px-2 pb-1.5 pt-0" />
                               <td className="px-2 pb-1.5 pt-0" />
                               <td className="px-2 pb-1.5 pt-0" />
                               <td className="px-2 pb-1.5 pt-0" />

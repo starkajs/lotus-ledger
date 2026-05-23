@@ -11,6 +11,8 @@ type WooCommerceOrdersFilterFormProps = {
   dateTo: string | null;
   period: DatePeriodPreset | null;
   lotusProductMissing: boolean;
+  stripeSearch: string;
+  stripeLinked: "all" | "linked" | "not_linked";
   action?: string;
 };
 
@@ -21,6 +23,8 @@ export function WooCommerceOrdersFilterForm({
   dateTo,
   period,
   lotusProductMissing,
+  stripeSearch,
+  stripeLinked,
   action,
 }: WooCommerceOrdersFilterFormProps) {
   return (
@@ -85,6 +89,26 @@ export function WooCommerceOrdersFilterForm({
         />
         Lotus product missing
       </label>
+      <label className="flex items-center gap-2 pb-1.5 text-xs text-ink-muted">
+        <input
+          type="checkbox"
+          name="stripeNotLinked"
+          value="yes"
+          defaultChecked={stripeLinked === "not_linked"}
+          className="rounded border-sand-dark/60"
+        />
+        Not linked to Stripe
+      </label>
+      <label className="flex flex-col gap-0.5 text-xs">
+        <span className="text-ink-muted">Stripe</span>
+        <input
+          type="search"
+          name="stripe"
+          defaultValue={stripeSearch}
+          placeholder="Order key, WC #, or txn id"
+          className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[10rem]"
+        />
+      </label>
       <button
         type="submit"
         className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1.5 text-sm hover:bg-surface"
@@ -100,13 +124,26 @@ export function WooCommerceOrdersFilterSummary({
   dateTo,
   period,
   lotusProductMissing,
+  stripeSearch,
+  stripeLinked,
 }: {
   dateFrom: string | null;
   dateTo: string | null;
   period: DatePeriodPreset | null;
   lotusProductMissing: boolean;
+  stripeSearch: string;
+  stripeLinked: "all" | "linked" | "not_linked";
 }) {
-  if (!dateFrom && !dateTo && !period && !lotusProductMissing) return null;
+  if (
+    !dateFrom &&
+    !dateTo &&
+    !period &&
+    !lotusProductMissing &&
+    !stripeSearch &&
+    stripeLinked === "all"
+  ) {
+    return null;
+  }
 
   return (
     <p className="mt-2 text-xs text-ink-muted">
@@ -131,6 +168,19 @@ export function WooCommerceOrdersFilterSummary({
         <span className={dateFrom || dateTo || period ? " · " : ""}>
           No linked Lotus product on any line
         </span>
+      )}
+      {stripeSearch && (
+        <span>
+          {" "}
+          · Stripe search:{" "}
+          <span className="font-mono text-dark">{stripeSearch}</span>
+        </span>
+      )}
+      {stripeLinked === "not_linked" && (
+        <span> · Not linked to Stripe</span>
+      )}
+      {stripeLinked === "linked" && (
+        <span> · Linked to Stripe only</span>
       )}
     </p>
   );

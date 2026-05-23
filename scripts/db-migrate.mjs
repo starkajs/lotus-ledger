@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
+import { checkDrizzleMigrations } from "./check-drizzle-migrations.mjs";
 
 // Load .env for local dev only (Fly injects DATABASE_URL; dotenv is devDependency)
 if (!process.env.DATABASE_URL) {
@@ -32,6 +33,13 @@ const client = postgres(databaseUrl, {
   onnotice: () => {},
 });
 const db = drizzle(client);
+
+try {
+  checkDrizzleMigrations();
+} catch (err) {
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+}
 
 console.log("Running Drizzle migrations...");
 await client`SET client_min_messages TO WARNING`;

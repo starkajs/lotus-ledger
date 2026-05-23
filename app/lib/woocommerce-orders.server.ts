@@ -1,8 +1,22 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, max, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  max,
+  or,
+  sql,
+} from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   communityMembers,
   products,
+  stripeBalanceTransactions,
   woocommerceOrders,
   woocommerceProducts,
   type WooCommerceOrderLineItem,
@@ -17,6 +31,12 @@ import {
   type IsoDateString,
 } from "~/lib/date-range-filters";
 import type { WooCommerceOrder } from "~/lib/woocommerce-api.server";
+import { extractOrderKeyFromWooCommerceOrder } from "~/lib/wc-stripe-order-link";
+import type { LinkedStripeTransactionSummary } from "~/lib/wc-stripe-order-link";
+import {
+  findLinkedStripeTransactionsBatch,
+  mergeLinkedStripeTransactionsForOrder,
+} from "~/lib/wc-stripe-order-link.server";
 import { parseWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
 
 export { WOOCOMMERCE_ORDER_SYNC_DAYS } from "~/lib/woocommerce-orders.constants";
@@ -33,6 +53,7 @@ export type WooCommerceOrderLotusProduct = {
 export type WooCommerceOrderRecord = {
   id: string;
   wcOrderId: number;
+  orderKey: string | null;
   orderNumber: string | null;
   status: string;
   currency: string;
@@ -66,6 +87,7 @@ export type WooCommerceOrderRecord = {
   productId: string | null;
   /** Lotus products from manual assignment and/or mapped WC line items. */
   lotusProducts: WooCommerceOrderLotusProduct[];
+  linkedStripeTransactions: LinkedStripeTransactionSummary[];
   syncedAt: string;
   createdAt: string;
   updatedAt: string;
@@ -73,6 +95,7 @@ export type WooCommerceOrderRecord = {
 
 export type UpsertWooCommerceOrderInput = {
   wcOrderId: number;
+  orderKey: string | null;
   orderNumber: string | null;
   status: string;
   currency: string;
@@ -153,6 +176,7 @@ export function mapWooCommerceOrder(
 
   return {
     wcOrderId: order.id,
+    orderKey: extractOrderKeyFromWooCommerceOrder(order),
     orderNumber: order.number?.trim() || String(order.id),
     status: order.status,
     currency,
@@ -193,6 +217,7 @@ function rowToRecord(
   return {
     id: row.id,
     wcOrderId: row.wcOrderId,
+    orderKey: row.orderKey,
     orderNumber: row.orderNumber,
     status: row.status,
     currency: row.currency,
@@ -224,6 +249,7 @@ function rowToRecord(
     memberName: member?.name ?? null,
     productId: row.productId,
     lotusProducts: [],
+    linkedStripeTransactions: [],
     syncedAt: row.syncedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -243,6 +269,7 @@ export async function upsertWooCommerceOrder(
     .limit(1);
 
   const values = {
+    orderKey: input.orderKey,
     orderNumber: input.orderNumber,
     status: input.status,
     currency: input.currency,
@@ -318,11 +345,25 @@ export type ListWooCommerceOrdersOptions = {
   dateTo?: IsoDateString | null;
   /** Only orders with no line item linked to a Lotus catalog product. */
   lotusProductMissing?: boolean;
+  stripeSearch?: string;
+  stripeLinked?: "all" | "linked" | "not_linked";
   page?: number;
   pageSize?: number;
 };
 
-/** Order has ≥1 line whose WC product is mapped to a Lotus catalog product. */
+/** Order has ≥1 Stripe balance txn linked by order_key or WC order id. */
+const orderHasLinkedStripe = sql`exists (
+  select 1
+  from ${stripeBalanceTransactions} st
+  where (
+    (st.order_key = ${woocommerceOrders.orderKey}
+      and st.order_key is not null
+      and ${woocommerceOrders.orderKey} is not null)
+    or (st.wc_order_id = ${woocommerceOrders.wcOrderId}
+      and st.wc_order_id is not null)
+  )
+)`;
+
 const orderHasMappedLotusProduct = sql`exists (
   select 1
   from jsonb_array_elements(coalesce(${woocommerceOrders.lineItems}, '[]'::jsonb)) as line(elem)
@@ -354,6 +395,39 @@ function buildWooCommerceOrdersWhere(options: ListWooCommerceOrdersOptions) {
     filters.push(
       sql`not (${orderHasMappedLotusProduct} or ${woocommerceOrders.productId} is not null)`,
     );
+  }
+
+  const stripeSearch = options.stripeSearch?.trim();
+  if (stripeSearch) {
+    const pattern = `%${stripeSearch}%`;
+    const wcIdSearch = /^\d+$/.test(stripeSearch)
+      ? Number.parseInt(stripeSearch, 10)
+      : null;
+    const stripeMatchParts = [
+      ilike(woocommerceOrders.orderKey, pattern),
+      ilike(woocommerceOrders.orderNumber, pattern),
+      sql`exists (
+          select 1
+          from ${stripeBalanceTransactions} st
+          where (
+            (st.order_key = ${woocommerceOrders.orderKey}
+              and st.order_key is not null)
+            or (st.wc_order_id = ${woocommerceOrders.wcOrderId}
+              and st.wc_order_id is not null)
+          )
+          and ilike(st.stripe_balance_transaction_id, ${pattern})
+        )`,
+    ];
+    if (wcIdSearch != null && wcIdSearch > 0) {
+      stripeMatchParts.push(eq(woocommerceOrders.wcOrderId, wcIdSearch));
+    }
+    filters.push(or(...stripeMatchParts));
+  }
+
+  if (options.stripeLinked === "linked") {
+    filters.push(orderHasLinkedStripe);
+  } else if (options.stripeLinked === "not_linked") {
+    filters.push(sql`not (${orderHasLinkedStripe})`);
   }
 
   if (filters.length === 0) return undefined;
@@ -456,6 +530,28 @@ async function attachLotusProductsToOrders(
   });
 }
 
+async function attachStripeLinksToOrders(
+  orders: WooCommerceOrderRecord[],
+): Promise<WooCommerceOrderRecord[]> {
+  if (orders.length === 0) return orders;
+
+  const batch = await findLinkedStripeTransactionsBatch({
+    orderKeys: orders
+      .map((o) => o.orderKey)
+      .filter((k): k is string => Boolean(k)),
+    wcOrderIds: orders.map((o) => o.wcOrderId),
+  });
+
+  return orders.map((order) => ({
+    ...order,
+    linkedStripeTransactions: mergeLinkedStripeTransactionsForOrder({
+      orderKey: order.orderKey,
+      wcOrderId: order.wcOrderId,
+      batch,
+    }),
+  }));
+}
+
 export async function listWooCommerceOrdersFromDb(
   options: ListWooCommerceOrdersOptions = {},
 ): Promise<ListWooCommerceOrdersDbResult> {
@@ -497,7 +593,7 @@ export async function listWooCommerceOrdersFromDb(
     .select({ lastSyncedAt: max(woocommerceOrders.syncedAt) })
     .from(woocommerceOrders);
 
-  const orders = await attachLotusProductsToOrders(
+  const ordersWithLotus = await attachLotusProductsToOrders(
     rows.map((row) =>
       rowToRecord(row.order, {
         email: row.memberEmail,
@@ -505,6 +601,7 @@ export async function listWooCommerceOrdersFromDb(
       }),
     ),
   );
+  const orders = await attachStripeLinksToOrders(ordersWithLotus);
 
   return {
     configured: isWooCommerceConfigured(),

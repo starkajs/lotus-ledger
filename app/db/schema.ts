@@ -1,6 +1,7 @@
 import {
   boolean,
   date,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -160,6 +161,10 @@ export const stripeBalanceTransactions = pgTable(
     sourceId: text("source_id"),
     /** `pi_…` from charge / payment_intent source (QuickBooks tracking # historically). */
     stripePaymentIntentId: text("stripe_payment_intent_id"),
+    /** WooCommerce `order_key` from charge metadata when present. */
+    orderKey: text("order_key"),
+    /** WooCommerce order id from charge metadata `order_id` when present. */
+    wcOrderId: integer("wc_order_id"),
     reportingCategory: text("reporting_category"),
     availableOn: timestamp("available_on", { withTimezone: true }),
     stripeCreatedAt: timestamp("stripe_created_at", { withTimezone: true }).notNull(),
@@ -192,6 +197,8 @@ export const stripeBalanceTransactions = pgTable(
       table.stripeConnectionId,
       table.stripeBalanceTransactionId,
     ),
+    index("stripe_balance_transactions_order_key_idx").on(table.orderKey),
+    index("stripe_balance_transactions_wc_order_id_idx").on(table.wcOrderId),
   ],
 );
 
@@ -332,6 +339,8 @@ export const woocommerceOrders = pgTable(
   {
     id: uuid().primaryKey().defaultRandom(),
     wcOrderId: integer("wc_order_id").notNull(),
+    /** WC `order_key` — links to Stripe charge metadata `order_key`. */
+    orderKey: text("order_key"),
     orderNumber: text("order_number"),
     status: text().notNull(),
     currency: text().notNull(),
@@ -370,7 +379,10 @@ export const woocommerceOrders = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique("woocommerce_orders_wc_order_id_unique").on(table.wcOrderId)],
+  (table) => [
+    unique("woocommerce_orders_wc_order_id_unique").on(table.wcOrderId),
+    index("woocommerce_orders_order_key_idx").on(table.orderKey),
+  ],
 );
 
 export type WooCommerceOrderLineItem = {

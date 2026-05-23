@@ -16,6 +16,8 @@ type StripeTransactionsFilterFormProps = {
   dateFrom: string | null;
   dateTo: string | null;
   period: DatePeriodPreset | null;
+  wcOrderSearch: string;
+  wcLinked: "all" | "linked" | "not_linked";
   action?: string;
 };
 
@@ -27,6 +29,8 @@ export function StripeTransactionsFilterForm({
   dateFrom,
   dateTo,
   period,
+  wcOrderSearch,
+  wcLinked,
   action,
 }: StripeTransactionsFilterFormProps) {
   return (
@@ -110,6 +114,28 @@ export function StripeTransactionsFilterForm({
             ))}
           </select>
         </label>
+        <label className="flex flex-col gap-0.5 text-xs">
+          <span className="text-ink-muted">WC order</span>
+          <input
+            type="search"
+            name="wcOrder"
+            defaultValue={wcOrderSearch}
+            placeholder="Order key, WC order id, or #"
+            className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[10rem]"
+          />
+        </label>
+        <label className="flex flex-col gap-0.5 text-xs">
+          <span className="text-ink-muted">WC link</span>
+          <select
+            name="wcLinked"
+            defaultValue={wcLinked}
+            className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
+          >
+            <option value="all">All</option>
+            <option value="linked">Linked</option>
+            <option value="not_linked">Not linked</option>
+          </select>
+        </label>
         <button
           type="submit"
           className="rounded-jamyang-pill border border-sand-dark/60 px-3 py-1.5 text-sm hover:bg-surface"
@@ -125,13 +151,26 @@ export function StripeTransactionsFilterSummary({
   dateTo,
   period,
   product,
+  wcOrderSearch,
+  wcLinked,
 }: {
   dateFrom: string | null;
   dateTo: string | null;
   period: DatePeriodPreset | null;
   product: "all" | StripeProductMatchFilter;
+  wcOrderSearch: string;
+  wcLinked: "all" | "linked" | "not_linked";
 }) {
-  if (!dateFrom && !dateTo && !period && product === "all") return null;
+  if (
+    !dateFrom &&
+    !dateTo &&
+    !period &&
+    product === "all" &&
+    !wcOrderSearch &&
+    wcLinked === "all"
+  ) {
+    return null;
+  }
 
   return (
     <p className="mt-2 text-xs text-ink-muted">
@@ -155,6 +194,21 @@ export function StripeTransactionsFilterSummary({
       {product === "unmatched" && (
         <span className={dateFrom || dateTo || period ? " · " : ""}>
           Unmatched product only
+        </span>
+      )}
+      {wcOrderSearch && (
+        <span
+          className={
+            dateFrom || dateTo || period || product !== "all" ? " · " : ""
+          }
+        >
+          WC order search: <span className="font-mono text-dark">{wcOrderSearch}</span>
+        </span>
+      )}
+      {wcLinked !== "all" && (
+        <span>
+          {" "}
+          · WC {wcLinked === "linked" ? "linked only" : "not linked"}
         </span>
       )}
     </p>

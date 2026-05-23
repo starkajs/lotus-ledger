@@ -1,4 +1,7 @@
-import type { DatePeriodPreset } from "~/lib/date-range-filters";
+import {
+  resolveOrderDateFilters,
+  type DatePeriodPreset,
+} from "~/lib/date-range-filters";
 
 export type WooCommerceOrderListFilters = {
   status: string;
@@ -6,7 +9,52 @@ export type WooCommerceOrderListFilters = {
   dateTo: string | null;
   period: DatePeriodPreset | null;
   lotusProductMissing: boolean;
+  /** Order key, order #, or Stripe transaction id. */
+  stripeSearch: string;
+  stripeLinked: "all" | "linked" | "not_linked";
 };
+
+export function parseWooCommerceOrderFiltersFromUrl(
+  params: URLSearchParams,
+): Pick<
+  WooCommerceOrderListFilters,
+  | "status"
+  | "dateFrom"
+  | "dateTo"
+  | "period"
+  | "lotusProductMissing"
+  | "stripeSearch"
+  | "stripeLinked"
+> {
+  const { dateFrom, dateTo, period } = resolveOrderDateFilters({
+    period: params.get("period"),
+    from: params.get("from"),
+    to: params.get("to"),
+  });
+  const status = params.get("status")?.trim() ?? "all";
+  const lotusProductMissing = params.get("lotusMissing") === "yes";
+  const stripeSearch = params.get("stripe")?.trim() ?? "";
+  const stripeNotLinked =
+    params.get("stripeNotLinked") === "yes" ||
+    params.get("stripeLinked") === "not_linked";
+  const stripeLinkedRaw = params.get("stripeLinked");
+  const stripeLinked: WooCommerceOrderListFilters["stripeLinked"] =
+    stripeNotLinked
+      ? "not_linked"
+      : stripeLinkedRaw === "linked"
+        ? "linked"
+        : "all";
+
+  return {
+    status,
+    dateFrom,
+    dateTo,
+    period,
+    lotusProductMissing,
+    stripeSearch,
+    stripeLinked,
+  };
+}
 
 export function appendWooCommerceOrderDateFilters(
   params: URLSearchParams,
@@ -28,6 +76,12 @@ export function buildWooCommerceOrdersSearchParams(
   if (filters.status !== "all") params.set("status", filters.status);
   appendWooCommerceOrderDateFilters(params, filters);
   if (filters.lotusProductMissing) params.set("lotusMissing", "yes");
+  if (filters.stripeSearch.trim()) params.set("stripe", filters.stripeSearch.trim());
+  if (filters.stripeLinked === "not_linked") {
+    params.set("stripeNotLinked", "yes");
+  } else if (filters.stripeLinked === "linked") {
+    params.set("stripeLinked", "linked");
+  }
   if (page != null && page > 1) params.set("page", String(page));
   return params;
 }

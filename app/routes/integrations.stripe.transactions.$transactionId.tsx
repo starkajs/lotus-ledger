@@ -15,6 +15,18 @@ import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction
 import { getProductMatchRuleById, listProducts } from "~/lib/products.server";
 import { getStripeBalanceTransactionById } from "~/lib/stripe-balance-transactions.server";
 import { requireUser } from "~/lib/session.server";
+import {
+  findLinkedWooCommerceOrderForStripeTransaction,
+  setStripeTransactionProductFromWooCommerceOrder,
+} from "~/lib/wc-stripe-order-link.server";
+import {
+  isStripeProductUnmatched,
+  primaryLotusProductIdFromWooCommerceOrder,
+} from "~/lib/wc-stripe-order-link";
+import { WooCommerceOrderLines } from "~/components/woocommerce-order-lines";
+import { getWooCommerceOrderById } from "~/lib/woocommerce-orders.server";
+import type { WooCommerceOrderRecord } from "~/lib/woocommerce-orders.server";
+import { formatWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
 
 function formatDateTime(iso: string | null) {
   if (!iso) return "—";
@@ -94,6 +106,35 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     ? "https://dashboard.stripe.com"
     : "https://dashboard.stripe.com/test";
 
+  const linkedWcOrder = await findLinkedWooCommerceOrderForStripeTransaction(
+    params.transactionId,
+  );
+  let linkedWcOrderFull: WooCommerceOrderRecord | null = null;
+  let wcLotusProductForCopy: {
+    productId: string;
+    code: string;
+    name: string;
+  } | null = null;
+
+  if (linkedWcOrder) {
+    linkedWcOrderFull = await getWooCommerceOrderById(linkedWcOrder.id);
+    if (linkedWcOrderFull) {
+      const productId = primaryLotusProductIdFromWooCommerceOrder(linkedWcOrderFull);
+      if (productId) {
+        const lotus = linkedWcOrderFull.lotusProducts.find(
+          (p) => p.catalogProductId === productId,
+        );
+        wcLotusProductForCopy = {
+          productId,
+          code: lotus?.code ?? "—",
+          name: lotus?.name ?? "Product",
+        };
+      }
+    }
+  }
+
+  const stripeUnmatched = isStripeProductUnmatched(tx);
+
   return {
     tx,
     products,
@@ -102,6 +143,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     pushCheck,
     returnTo,
     stripeDashboardUrl: `${stripeDashboardHost}/balance/all-activity`,
+    linkedWcOrder,
+    linkedWcOrderFull,
+    wcLotusProductForCopy,
+    stripeUnmatched,
   };
 }
 
@@ -123,6 +168,22 @@ export async function action({ request, params }: Route.ActionArgs) {
       triggeredBy: "app",
       userId: user.id,
     });
+    return redirect(redirectUrl);
+  }
+
+  if (intent === "copyProductFromWc") {
+    const wcOrderId = String(form.get("wcOrderId") ?? "").trim();
+    if (!wcOrderId) {
+      return { scope: "wcProduct" as const, error: "Missing WooCommerce order" };
+    }
+    const result = await setStripeTransactionProductFromWooCommerceOrder(
+      params.transactionId,
+      wcOrderId,
+      { triggeredBy: "app", userId: user.id },
+    );
+    if (!result.ok) {
+      return { scope: "wcProduct" as const, error: result.reason };
+    }
     return redirect(redirectUrl);
   }
 
@@ -164,6 +225,10 @@ export default function StripeTransactionDetailPage({
     pushCheck,
     returnTo,
     stripeDashboardUrl,
+    linkedWcOrder,
+    linkedWcOrderFull,
+    wcLotusProductForCopy,
+    stripeUnmatched,
   } = loaderData;
   const location = useLocation();
   const postAction = location.pathname + location.search;
@@ -181,6 +246,95 @@ export default function StripeTransactionDetailPage({
         </Link>
       }
     >
+      <div className="mb-4 rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay px-4 py-4 sm:px-6">
+        <h2 className="text-sm font-medium text-dark">WooCommerce order</h2>
+        <p className="mt-1 text-xs text-ink-muted">
+          Matched when Stripe charge metadata{" "}
+          <span className="font-mono">order_key</span> equals the WooCommerce
+          order key.
+        </p>
+        {tx.orderKey ? (
+          <p className="mt-2 text-xs text-ink-muted">
+            Order key:{" "}
+            <span className="font-mono text-dark">{tx.orderKey}</span>
+          </p>
+        ) : null}
+        {linkedWcOrder ? (
+          <div className="mt-3 space-y-3 text-sm">
+            <p>
+              <span className="mr-2 inline-flex rounded bg-jade/15 px-1.5 py-0.5 text-[10px] font-medium text-jade">
+                Linked
+              </span>
+              <Link
+                to={`/integrations/woocommerce/orders/${linkedWcOrder.id}?returnTo=${encodeURIComponent(returnTo)}`}
+                className="font-medium text-teal hover:underline"
+              >
+                WC order #{linkedWcOrder.orderNumber ?? linkedWcOrder.wcOrderId}
+              </Link>
+              <span className="text-ink-muted">
+                {" "}
+                · {linkedWcOrder.status.replace(/-/g, " ")} ·{" "}
+                {formatWooCommerceMoneyMinor(
+                  linkedWcOrder.totalMinor,
+                  linkedWcOrder.currency,
+                )}
+              </span>
+            </p>
+            {linkedWcOrderFull && (
+              <div>
+                <h3 className="text-xs font-medium text-ink-muted">Order lines</h3>
+                <div className="mt-2">
+                  <WooCommerceOrderLines
+                    lineItems={linkedWcOrderFull.lineItems}
+                    lineSummary={linkedWcOrderFull.lineSummary}
+                    currency={linkedWcOrderFull.currency}
+                  />
+                </div>
+              </div>
+            )}
+            {stripeUnmatched && wcLotusProductForCopy ? (
+              <Form
+                method="post"
+                action={postAction}
+                className="flex flex-wrap items-center gap-2"
+              >
+                <input type="hidden" name="returnTo" value={returnTo} />
+                <input
+                  type="hidden"
+                  name="wcOrderId"
+                  value={linkedWcOrder.id}
+                />
+                <SubmitButton
+                  intent="copyProductFromWc"
+                  variant="pill"
+                  loadingLabel="Applying…"
+                >
+                  Use Lotus product from WC order ({wcLotusProductForCopy.code})
+                </SubmitButton>
+              </Form>
+            ) : stripeUnmatched && linkedWcOrder ? (
+              <p className="text-xs text-ink-muted">
+                Linked order has no Lotus product to copy — assign one on the
+                WC order first.
+              </p>
+            ) : null}
+          </div>
+        ) : tx.orderKey ? (
+          <p className="mt-3 text-sm text-ink-muted">
+            No synced WooCommerce order with this order key.
+          </p>
+        ) : (
+          <p className="mt-3 text-sm text-ink-muted">
+            No order key on this Stripe transaction (metadata may be missing).
+          </p>
+        )}
+        {actionData?.scope === "wcProduct" && actionData.error && (
+          <p className="mt-2 text-sm text-maroon" role="alert">
+            {actionData.error}
+          </p>
+        )}
+      </div>
+
       <div className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay px-4 py-4 sm:px-6">
         <h2 className="text-sm font-medium text-dark">Product</h2>
         <p className="mt-1 text-xs text-ink-muted">
@@ -279,6 +433,9 @@ export default function StripeTransactionDetailPage({
           </DetailRow>
           <DetailRow label="Line items summary">
             <MultilineText value={productSignals.lineItemsSummary} />
+          </DetailRow>
+          <DetailRow label="WC order key (metadata)">
+            <MultilineText value={tx.orderKey} />
           </DetailRow>
           <DetailRow label="SKU">
             <MultilineText value={productSignals.sku} />

@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   gt,
+  ilike,
   inArray,
   isNotNull,
   isNull,
@@ -14,11 +15,13 @@ import {
   sum,
 } from "drizzle-orm";
 import { getDb } from "~/db";
+import { stripeTransactionMatchesWooCommerceOrder } from "~/lib/wc-stripe-order-link";
 import {
   communityMembers,
   products,
   stripeBalanceTransactions,
   stripeConnections,
+  woocommerceOrders,
 } from "~/db/schema";
 import type { ProductMatchStatus } from "./product-classification.server";
 import { initialPushedToQuickbooks } from "./stripe-quickbooks.constants";
@@ -32,6 +35,8 @@ import {
   extractPaymentIntentIdFromStripeRaw,
   extractSkuFromStripeRaw,
   extractStripeGuestBillingFromStripeRaw,
+  extractOrderKeyFromStripeRaw,
+  extractWcOrderIdFromStripeRaw,
   extractStripeTransactionProductSignals,
 } from "./stripe-transaction-signals";
 
@@ -51,6 +56,7 @@ export type StripeBalanceTransactionRecord = {
   sku: string | null;
   sourceId: string | null;
   stripePaymentIntentId: string | null;
+  orderKey: string | null;
   reportingCategory: string | null;
   availableOn: string | null;
   stripeCreatedAt: string;
@@ -68,6 +74,10 @@ export type StripeBalanceTransactionRecord = {
   productMatchedAt: string | null;
   pushedToQuickbooks: boolean | null;
   quickbooksPushedAt: string | null;
+  /** Set when a synced WC order matches order_key and/or WC order id. */
+  linkedWcOrderId: string | null;
+  linkedWcOrderNumber: string | null;
+  linkedWcWcOrderId: number | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -168,6 +178,11 @@ function rowToRecord(
     name: string | null;
     quickbooksItemId: string | null;
   } | null,
+  linkedWc?: {
+    id: string;
+    orderNumber: string | null;
+    wcOrderId: number;
+  } | null,
 ): StripeBalanceTransactionRecord {
   return {
     id: row.id,
@@ -186,6 +201,8 @@ function rowToRecord(
       row.stripePaymentIntentId ??
       extractPaymentIntentIdFromStripeRaw(row.stripeRaw) ??
       null,
+    orderKey:
+      row.orderKey ?? extractOrderKeyFromStripeRaw(row.stripeRaw ?? null),
     reportingCategory: row.reportingCategory,
     availableOn: row.availableOn?.toISOString() ?? null,
     stripeCreatedAt: row.stripeCreatedAt.toISOString(),
@@ -203,6 +220,9 @@ function rowToRecord(
     productMatchedAt: row.productMatchedAt?.toISOString() ?? null,
     pushedToQuickbooks: row.pushedToQuickbooks,
     quickbooksPushedAt: row.quickbooksPushedAt?.toISOString() ?? null,
+    linkedWcOrderId: linkedWc?.id ?? null,
+    linkedWcOrderNumber: linkedWc?.orderNumber ?? null,
+    linkedWcWcOrderId: linkedWc?.wcOrderId ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -255,6 +275,8 @@ export async function upsertStripeBalanceTransaction(
         stripeCreatedAt: input.stripeCreatedAt,
         stripeRaw: input.stripeRaw,
         sku: input.sku ?? null,
+        orderKey: extractOrderKeyFromStripeRaw(input.stripeRaw),
+        wcOrderId: extractWcOrderIdFromStripeRaw(input.stripeRaw),
         ...memberFields,
         updatedAt: now,
       })
@@ -282,6 +304,8 @@ export async function upsertStripeBalanceTransaction(
       stripeCreatedAt: input.stripeCreatedAt,
       stripeRaw: input.stripeRaw,
       sku: input.sku ?? null,
+      orderKey: extractOrderKeyFromStripeRaw(input.stripeRaw),
+      wcOrderId: extractWcOrderIdFromStripeRaw(input.stripeRaw),
       pushedToQuickbooks: initialPushedToQuickbooks(input.stripeCreatedAt),
       ...memberFields,
     })
@@ -305,6 +329,9 @@ export type ListStripeBalanceTransactionsOptions = {
   /** Inclusive calendar dates (Europe/London) on stripeCreatedAt. */
   dateFrom?: IsoDateString | null;
   dateTo?: IsoDateString | null;
+  /** Partial match on Stripe order_key or linked WC order number. */
+  wcOrderSearch?: string;
+  wcLinked?: "all" | "linked" | "not_linked";
   page?: number;
   pageSize?: number;
 };
@@ -367,6 +394,29 @@ function buildListWhere(options: ListStripeBalanceTransactionsOptions) {
     );
   }
 
+  const wcSearch = options.wcOrderSearch?.trim();
+  if (wcSearch) {
+    const pattern = `%${wcSearch}%`;
+    const wcIdSearch = /^\d+$/.test(wcSearch)
+      ? Number.parseInt(wcSearch, 10)
+      : null;
+    const searchParts = [
+      ilike(stripeBalanceTransactions.orderKey, pattern),
+      ilike(woocommerceOrders.orderNumber, pattern),
+    ];
+    if (wcIdSearch != null && wcIdSearch > 0) {
+      searchParts.push(eq(stripeBalanceTransactions.wcOrderId, wcIdSearch));
+      searchParts.push(eq(woocommerceOrders.wcOrderId, wcIdSearch));
+    }
+    parts.push(or(...searchParts));
+  }
+
+  if (options.wcLinked === "linked") {
+    parts.push(isNotNull(woocommerceOrders.id));
+  } else if (options.wcLinked === "not_linked") {
+    parts.push(isNull(woocommerceOrders.id));
+  }
+
   if (parts.length === 0) return undefined;
   if (parts.length === 1) return parts[0];
   return and(...parts);
@@ -399,9 +449,12 @@ export async function listStripeBalanceTransactions(
 
   const db = getDb();
 
+  const wcJoin = stripeTransactionMatchesWooCommerceOrder();
+
   const [{ value: total }] = await db
     .select({ value: count() })
     .from(stripeBalanceTransactions)
+    .leftJoin(woocommerceOrders, wcJoin)
     .where(where);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -416,6 +469,9 @@ export async function listStripeBalanceTransactions(
       productCode: products.code,
       productName: products.name,
       productQuickbooksItemId: products.quickbooksItemId,
+      linkedWcOrderId: woocommerceOrders.id,
+      linkedWcOrderNumber: woocommerceOrders.orderNumber,
+      linkedWcWcOrderId: woocommerceOrders.wcOrderId,
     })
     .from(stripeBalanceTransactions)
     .leftJoin(
@@ -423,6 +479,7 @@ export async function listStripeBalanceTransactions(
       eq(stripeBalanceTransactions.communityMemberId, communityMembers.id),
     )
     .leftJoin(products, eq(stripeBalanceTransactions.productId, products.id))
+    .leftJoin(woocommerceOrders, wcJoin)
     .where(where)
     .orderBy(desc(stripeBalanceTransactions.stripeCreatedAt))
     .limit(pageSize)
@@ -438,6 +495,13 @@ export async function listStripeBalanceTransactions(
           name: row.productName,
           quickbooksItemId: row.productQuickbooksItemId,
         },
+        row.linkedWcOrderId
+          ? {
+              id: row.linkedWcOrderId,
+              orderNumber: row.linkedWcOrderNumber,
+              wcOrderId: row.linkedWcWcOrderId!,
+            }
+          : null,
       ),
     ),
     total,
@@ -566,6 +630,7 @@ export async function aggregateStripeTransactionsByProduct(
     })
     .from(stripeBalanceTransactions)
     .leftJoin(products, eq(stripeBalanceTransactions.productId, products.id))
+    .leftJoin(woocommerceOrders, stripeTransactionMatchesWooCommerceOrder())
     .where(where);
 
   const buckets = new Map<string, StripeLotusBucket>();

@@ -62,7 +62,7 @@ npm run build
 
 **Start here:** **[docs/deploy-fly.md](docs/deploy-fly.md)** — create the app → deploy without a DB → create Fly Postgres → attach → run Drizzle migrations → add secrets.
 
-Database: **Drizzle** (`app/db/schema.ts`, `drizzle/`). Do not run `db:migrate` until `DATABASE_URL` points at Fly Postgres (or a local proxy).
+Database: **Drizzle** (`app/db/schema.ts`, `drizzle/`). See **[docs/database-migrations.md](docs/database-migrations.md)** — always use `npm run db:generate` after schema changes (never add SQL without updating `drizzle/meta/_journal.json`). Do not run `db:migrate` until `DATABASE_URL` points at Fly Postgres (or a local proxy).
 
 ### Docker (local or other platforms)
 

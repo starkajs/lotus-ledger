@@ -283,6 +283,79 @@ export function extractStripeGuestBillingFromStripeRaw(
  * Read a dedicated SKU from expanded charge metadata when Stripe adds it.
  * Does not parse line_items_summary; use sku match rules for bracket codes.
  */
+function orderKeyFromMetadata(
+  metadata: Record<string, unknown> | null,
+): string | null {
+  if (!metadata) return null;
+  return (
+    metadataString(metadata.order_key) ?? metadataString(metadata.orderKey)
+  );
+}
+
+function wcOrderIdFromMetadata(
+  metadata: Record<string, unknown> | null,
+): number | null {
+  if (!metadata) return null;
+  const raw =
+    metadata.order_id ??
+    metadata.orderId ??
+    metadata.Order_ID ??
+    metadata.OrderId;
+  if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) {
+    return raw;
+  }
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const parsed = Number.parseInt(trimmed, 10);
+      return parsed > 0 ? parsed : null;
+    }
+  }
+  return null;
+}
+
+/** WooCommerce order key from charge or payment_intent metadata (`order_key`). */
+export function extractOrderKeyFromStripeRaw(
+  stripeRaw: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!stripeRaw) return null;
+
+  const charge = chargeRecordFromStripeRaw(stripeRaw);
+  if (charge) {
+    const key = orderKeyFromMetadata(asRecord(charge.metadata));
+    if (key) return key;
+  }
+
+  const source = asRecord(stripeRaw.source);
+  if (source?.object === "payment_intent") {
+    const key = orderKeyFromMetadata(asRecord(source.metadata));
+    if (key) return key;
+  }
+
+  return null;
+}
+
+/** WooCommerce order id from charge or payment_intent metadata (`order_id`). */
+export function extractWcOrderIdFromStripeRaw(
+  stripeRaw: Record<string, unknown> | null | undefined,
+): number | null {
+  if (!stripeRaw) return null;
+
+  const charge = chargeRecordFromStripeRaw(stripeRaw);
+  if (charge) {
+    const id = wcOrderIdFromMetadata(asRecord(charge.metadata));
+    if (id) return id;
+  }
+
+  const source = asRecord(stripeRaw.source);
+  if (source?.object === "payment_intent") {
+    const id = wcOrderIdFromMetadata(asRecord(source.metadata));
+    if (id) return id;
+  }
+
+  return null;
+}
+
 export function extractSkuFromStripeRaw(
   stripeRaw: Record<string, unknown> | null | undefined,
 ): string | null {

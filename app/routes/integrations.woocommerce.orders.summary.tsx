@@ -6,8 +6,8 @@ import {
   WooCommerceOrdersFilterForm,
   WooCommerceOrdersFilterSummary,
 } from "~/components/woocommerce-orders-filter-form";
-import { resolveOrderDateFilters } from "~/lib/date-range-filters";
 import {
+  parseWooCommerceOrderFiltersFromUrl,
   wooCommerceOrdersHref,
   type WooCommerceOrderListFilters,
 } from "~/lib/woocommerce-orders-filters";
@@ -63,36 +63,30 @@ export function meta({}: Route.MetaArgs) {
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   const url = new URL(request.url);
-  const statusRaw = url.searchParams.get("status")?.trim() ?? "all";
-  const { dateFrom, dateTo, period } = resolveOrderDateFilters({
-    period: url.searchParams.get("period"),
-    from: url.searchParams.get("from"),
-    to: url.searchParams.get("to"),
-  });
-  const lotusProductMissing = url.searchParams.get("lotusMissing") === "yes";
+  const parsed = parseWooCommerceOrderFiltersFromUrl(url.searchParams);
 
   const [aggregation, statuses] = await Promise.all([
     aggregateWooCommerceOrdersByLotusAndLine({
-      status: statusRaw,
-      dateFrom,
-      dateTo,
-      lotusProductMissing,
+      status: parsed.status,
+      dateFrom: parsed.dateFrom,
+      dateTo: parsed.dateTo,
+      lotusProductMissing: parsed.lotusProductMissing,
+      stripeSearch: parsed.stripeSearch,
+      stripeLinked: parsed.stripeLinked,
     }),
     listDistinctWooCommerceOrderStatuses(),
   ]);
 
-  const status = statuses.includes(statusRaw) || statusRaw === "all"
-    ? statusRaw
-    : "all";
+  const status =
+    statuses.includes(parsed.status) || parsed.status === "all"
+      ? parsed.status
+      : "all";
 
   return {
     ...aggregation,
-    status,
     statuses,
-    dateFrom,
-    dateTo,
-    period,
-    lotusProductMissing,
+    ...parsed,
+    status,
   };
 }
 
@@ -111,6 +105,8 @@ export default function WooCommerceOrdersSummaryPage({
     dateTo,
     period,
     lotusProductMissing,
+    stripeSearch,
+    stripeLinked,
   } = loaderData;
 
   const listFilters: WooCommerceOrderListFilters = {
@@ -119,6 +115,8 @@ export default function WooCommerceOrdersSummaryPage({
     dateTo,
     period,
     lotusProductMissing,
+    stripeSearch,
+    stripeLinked,
   };
 
   const ordersListHref = wooCommerceOrdersHref(ORDERS_PATH, listFilters);
@@ -174,6 +172,8 @@ export default function WooCommerceOrdersSummaryPage({
             dateTo={dateTo}
             period={period}
             lotusProductMissing={lotusProductMissing}
+            stripeSearch={stripeSearch}
+            stripeLinked={stripeLinked}
             action={SUMMARY_PATH}
           />
           <WooCommerceOrdersFilterSummary
@@ -181,6 +181,8 @@ export default function WooCommerceOrdersSummaryPage({
             dateTo={dateTo}
             period={period}
             lotusProductMissing={lotusProductMissing}
+            stripeSearch={stripeSearch}
+            stripeLinked={stripeLinked}
           />
 
           <p className="mt-3 text-xs text-ink-muted">

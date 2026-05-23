@@ -27,6 +27,7 @@ export type WooCommerceLineItem = {
 
 export type WooCommerceOrder = {
   id: number;
+  order_key?: string;
   number?: string;
   status: string;
   currency: string;

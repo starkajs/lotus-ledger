@@ -11,6 +11,8 @@ import {
   lookupOrderLineItemsInWooCommerceCatalog,
   type OrderLineSkuLookup,
 } from "~/lib/woocommerce-products.server";
+import { LinkedStripeTransactionsTable } from "~/components/linked-stripe-transactions-table";
+import { findLinkedStripeTransactionsForWooCommerceOrder } from "~/lib/wc-stripe-order-link.server";
 import {
   getWooCommerceOrderById,
   setWooCommerceOrderLotusProduct,
@@ -100,6 +102,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     ? `${siteUrl}/wp-admin/post.php?post=${order.wcOrderId}&action=edit`
     : null;
 
+  const linkedStripeTransactions =
+    await findLinkedStripeTransactionsForWooCommerceOrder(params.orderId);
+
   return {
     order,
     returnTo,
@@ -108,6 +113,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     lineLotusProducts,
     lineLookups,
     wpAdminOrderUrl,
+    linkedStripeTransactions,
   };
 }
 
@@ -188,6 +194,7 @@ export default function WooCommerceOrderDetailPage({
     lineLotusProducts,
     lineLookups,
     wpAdminOrderUrl,
+    linkedStripeTransactions,
   } = loaderData;
   const lineLookupById = new Map(
     lineLookups.map((lookup) => [lookup.lineId, lookup]),
@@ -272,6 +279,44 @@ export default function WooCommerceOrderDetailPage({
         )}
       </div>
 
+      <div className="mb-4 rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay px-4 py-4 sm:px-6">
+        <h2 className="text-sm font-medium text-dark">Stripe payment</h2>
+        <p className="mt-1 text-xs text-ink-muted">
+          Linked when Stripe charge metadata{" "}
+          <span className="font-mono">order_key</span> matches this order&apos;s
+          key.
+        </p>
+        {order.orderKey ? (
+          <p className="mt-2 text-xs text-ink-muted">
+            Order key:{" "}
+            <span className="font-mono text-dark">{order.orderKey}</span>
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-ink-muted">No order key on this order.</p>
+        )}
+        {linkedStripeTransactions.length > 0 ? (
+          <div className="mt-3 space-y-3">
+            <p className="text-sm">
+              <span className="mr-2 inline-flex rounded bg-jade/15 px-1.5 py-0.5 text-[10px] font-medium text-jade">
+                Linked
+              </span>
+              <span className="text-ink-muted">
+                {linkedStripeTransactions.length} Stripe transaction
+                {linkedStripeTransactions.length === 1 ? "" : "s"}
+              </span>
+            </p>
+            <LinkedStripeTransactionsTable
+              transactions={linkedStripeTransactions}
+              returnTo={returnTo}
+            />
+          </div>
+        ) : order.orderKey ? (
+          <p className="mt-3 text-sm text-ink-muted">
+            No synced Stripe transaction with this order key.
+          </p>
+        ) : null}
+      </div>
+
       <div className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay px-4 py-4 sm:px-6">
         <h2 className="text-sm font-medium text-dark">Summary</h2>
         <dl className="mt-3">
@@ -308,6 +353,13 @@ export default function WooCommerceOrderDetailPage({
           <DetailRow label="Payment">
             {order.paymentMethodTitle ?? order.paymentMethod ?? "—"}
           </DetailRow>
+          <DetailRow label="Order key">
+            {order.orderKey ? (
+              <span className="font-mono text-xs">{order.orderKey}</span>
+            ) : (
+              "—"
+            )}
+          </DetailRow>
           <DetailRow label="Transaction ID">
             {order.transactionId ? (
               <span className="font-mono text-xs">{order.transactionId}</span>
@@ -320,14 +372,17 @@ export default function WooCommerceOrderDetailPage({
         </dl>
       </div>
 
-      {order.lineItems.length > 0 && (
+      {(order.lineItems.length > 0 || order.lineSummary) && (
         <div className="mt-4 rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay px-4 py-4 sm:px-6">
-          <h2 className="text-sm font-medium text-dark">Line items</h2>
+          <h2 className="text-sm font-medium text-dark">Order lines</h2>
           <p className="mt-1 text-xs text-ink-muted">
-            Each line is matched to the synced WC product catalog by SKU (then WC
-            product id). Missing SKUs are highlighted when the product is no
-            longer in the catalog.
+            What this order was for. Lines are matched to the synced WC product
+            catalog by SKU (then WC product id).
           </p>
+          {order.lineItems.length === 0 && order.lineSummary ? (
+            <p className="mt-3 text-sm text-ink-muted">{order.lineSummary}</p>
+          ) : null}
+          {order.lineItems.length > 0 && (
           <div className="mt-3 overflow-x-auto rounded-jamyang border border-sand-dark/40">
             <table className="w-full min-w-[40rem] text-left text-xs">
               <thead className="bg-surface text-dark">
@@ -389,6 +444,7 @@ export default function WooCommerceOrderDetailPage({
               </tbody>
             </table>
           </div>
+          )}
         </div>
       )}
 

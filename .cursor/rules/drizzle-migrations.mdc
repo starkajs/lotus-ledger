@@ -1,0 +1,24 @@
+---
+description: Database schema and Drizzle migration workflow
+globs:
+  - app/db/**
+  - drizzle/**
+  - drizzle.config.ts
+  - scripts/db-migrate.mjs
+  - scripts/check-drizzle-migrations.mjs
+alwaysApply: false
+---
+
+# Drizzle migrations
+
+After changing `app/db/schema.ts`:
+
+1. Run `npm run db:generate` — never hand-write `drizzle/*.sql` without a journal entry.
+2. Commit the generated SQL, `drizzle/meta/_journal.json`, and snapshot together.
+3. Run `npm run db:migrate` (or tell the user to).
+
+`npm run db:migrate` only runs migrations registered in `drizzle/meta/_journal.json`. An orphan `drizzle/0027_foo.sql` file is ignored and causes runtime "column does not exist" errors.
+
+Before finishing schema work, run `npm run db:check` (also runs in `typecheck`).
+
+See `docs/database-migrations.md`.
