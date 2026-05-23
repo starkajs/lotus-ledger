@@ -7,7 +7,10 @@ import {
   listQuickBooksTaxCodes,
 } from "~/lib/quickbooks-master-data.server";
 import type { QuickBooksSalesReceiptCreate } from "~/lib/quickbooks-sales-receipt-create";
-import { resolveStripeQuickBooksPushTaxCode } from "~/lib/quickbooks-tax-code";
+import {
+  resolveStripeQuickBooksPushTaxCode,
+  type QuickBooksPushTaxCodeSource,
+} from "~/lib/quickbooks-tax-code";
 import { canPushTransactionToQuickbooks } from "~/lib/product-classification.server";
 import type { StripeConnectionQuickBooksMapping } from "~/lib/stripe-connections-quickbooks.server";
 import {
@@ -16,15 +19,29 @@ import {
 } from "~/lib/stripe-connections-quickbooks.server";
 import { stripeGrossToQuickBooksLineAmount } from "~/lib/stripe-quickbooks-push-amount";
 import type { StripeBalanceTransactionRecord } from "~/lib/stripe-balance-transactions.server";
-import {
-  collectStripeQuickBooksPushTexts,
-  evaluateStripeQuickBooksPushRule,
-  type StripeQuickBooksPushRuleRecord,
-} from "~/lib/stripe-quickbooks-push-rules.server";
 import { getProductById } from "~/lib/products.server";
+import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
+
+function lotusProductLabelForPrivateNote(
+  productCode: string | null | undefined,
+  productName: string | null | undefined,
+): string {
+  const code = productCode?.trim();
+  const name = productName?.trim();
+  if (code && name && code !== name) return `${code} · ${name}`;
+  return code || name || "—";
+}
+
+function defaultPrivateNoteForLotusPush(
+  lotusTransactionId: string,
+  productCode: string | null | undefined,
+  productName: string | null | undefined,
+): string {
+  const product = lotusProductLabelForPrivateNote(productCode, productName);
+  return `${product} | LL ${lotusTransactionId}`;
+}
 
 export type StripeQuickBooksPushPlan = {
-  pushRuleId: string | null;
   salesReceipt: QuickBooksSalesReceiptCreate | null;
   /** Stripe gross (customer paid). */
   grossAmountMajor: number | null;
@@ -33,7 +50,7 @@ export type StripeQuickBooksPushPlan = {
   vatRatePercent: number;
   currency: string | null;
   taxCodeId: string | null;
-  taxCodeSource: "rule" | "item" | null;
+  taxCodeSource: QuickBooksPushTaxCodeSource | null;
   issues: string[];
   ready: boolean;
 };
@@ -46,6 +63,26 @@ function applyTemplate(
     const v = vars[key];
     return v == null ? "" : String(v);
   });
+}
+
+/** Stripe charge/balance description for the Sales Receipt line. */
+function stripeDescriptionForSalesReceiptLine(
+  transaction: Pick<
+    StripeBalanceTransactionRecord,
+    "description" | "stripeRaw" | "sku" | "productCode"
+  >,
+): string {
+  const signals = extractStripeTransactionProductSignals({
+    stripeRaw: transaction.stripeRaw,
+    description: transaction.description,
+    sku: transaction.sku,
+  });
+  const fromStripe =
+    signals.description?.trim() ||
+    signals.chargeDescription?.trim() ||
+    signals.balanceDescription?.trim() ||
+    transaction.description?.trim();
+  return fromStripe || transaction.productCode?.trim() || "Sale";
 }
 
 export function planStripeQuickBooksPush(input: {
@@ -71,11 +108,11 @@ export function planStripeQuickBooksPush(input: {
     | "productCode"
     | "productName"
     | "productQuickbooksItemId"
+    | "productQuickbooksTaxCodeId"
     | "productVatRatePercent"
     | "pushedToQuickbooks"
     | "memberEmail"
   >;
-  pushRules: StripeQuickBooksPushRuleRecord[];
   stripeQb: StripeConnectionQuickBooksMapping | null;
   qbItem: QuickBooksItemPushDefaults | null;
 }): StripeQuickBooksPushPlan {
@@ -83,31 +120,6 @@ export function planStripeQuickBooksPush(input: {
   const pushCheck = canPushTransactionToQuickbooks(input.transaction);
   if (!pushCheck.ok) {
     issues.push(pushCheck.reason);
-  }
-
-  const texts = collectStripeQuickBooksPushTexts({
-    description: input.transaction.description,
-    stripeRaw: input.transaction.stripeRaw,
-    sku: input.transaction.sku,
-    type: input.transaction.type,
-    reportingCategory: input.transaction.reportingCategory,
-  });
-
-  const rule = evaluateStripeQuickBooksPushRule(texts, input.pushRules);
-  if (!rule) {
-    issues.push("No QuickBooks push rule matched this transaction");
-    return {
-      pushRuleId: null,
-      salesReceipt: null,
-      grossAmountMajor: null,
-      lineAmountMajor: null,
-      vatRatePercent: input.transaction.productVatRatePercent,
-      currency: input.transaction.currency,
-      taxCodeId: null,
-      taxCodeSource: null,
-      issues,
-      ready: false,
-    };
   }
 
   if (!input.transaction.productQuickbooksItemId) {
@@ -152,14 +164,13 @@ export function planStripeQuickBooksPush(input: {
   });
 
   const taxResolved = resolveStripeQuickBooksPushTaxCode({
-    ruleTaxCodeId: rule.taxCodeId,
+    productTaxCodeId: input.transaction.productQuickbooksTaxCodeId,
     itemSalesTaxCodeId: input.qbItem?.salesTaxCodeRef ?? null,
-    vatRatePercent,
   });
 
-  if (vatRatePercent > 0 && !taxResolved.taxCodeId) {
+  if (!taxResolved.taxCodeId) {
     issues.push(
-      "VAT applies but QuickBooks item has no tax code — refresh QB products",
+      "Lotus product has no QuickBooks VAT code — set it on Products (sync VAT codes under Integrations → QuickBooks → VAT codes)",
     );
   }
 
@@ -168,6 +179,7 @@ export function planStripeQuickBooksPush(input: {
   );
 
   const templateVars = {
+    lotus_transaction_id: input.transaction.id,
     stripe_balance_transaction_id: input.transaction.stripeBalanceTransactionId,
     payment_intent_id: input.transaction.stripePaymentIntentId ?? "",
     order_key: input.transaction.orderKey ?? "",
@@ -176,15 +188,11 @@ export function planStripeQuickBooksPush(input: {
         ? String(input.transaction.wcOrderId)
         : "",
     product_code: input.transaction.productCode ?? "",
+    member_email: input.transaction.memberEmail ?? "",
     fee: minorUnitsToMajor(input.transaction.fee, input.transaction.currency),
   };
 
-  const lineDescription =
-    rule.lineDescription?.trim() ||
-    applyTemplate("{{product_code}} — Stripe {{payment_intent_id}}", {
-      ...templateVars,
-      product_code: input.transaction.productCode ?? "Sale",
-    });
+  const lineDescription = stripeDescriptionForSalesReceiptLine(input.transaction);
 
   const paymentRefTemplate =
     input.stripeQb?.quickbooksPaymentRefTemplate?.trim() ||
@@ -193,16 +201,18 @@ export function planStripeQuickBooksPush(input: {
 
   const customerMemoTemplate =
     input.stripeQb?.quickbooksCustomerMemoTemplate?.trim() || "";
-  const customerMemo = customerMemoTemplate
-    ? applyTemplate(customerMemoTemplate, templateVars).trim()
-    : undefined;
+  const memberEmail = input.transaction.memberEmail?.trim() || "";
+  const customerMemo =
+    memberEmail ||
+    (customerMemoTemplate
+      ? applyTemplate(customerMemoTemplate, templateVars).trim()
+      : "");
 
-  const privateNote = rule.privateNoteTemplate?.trim()
-    ? applyTemplate(rule.privateNoteTemplate, templateVars)
-    : applyTemplate(
-        "LL {{stripe_balance_transaction_id}} · {{payment_intent_id}}",
-        templateVars,
-      );
+  const privateNote = defaultPrivateNoteForLotusPush(
+    input.transaction.id,
+    input.transaction.productCode,
+    input.transaction.productName,
+  );
 
   const lineDetail: QuickBooksSalesReceiptCreate["Line"][0]["SalesItemLineDetail"] =
     {
@@ -230,6 +240,7 @@ export function planStripeQuickBooksPush(input: {
   }
 
   const salesReceipt: QuickBooksSalesReceiptCreate = {
+    GlobalTaxCalculation: "TaxExcluded",
     TxnDate: txnDate,
     TrackingNum: input.transaction.stripePaymentIntentId ?? undefined,
     PaymentRefNum: paymentRefNum || undefined,
@@ -237,6 +248,7 @@ export function planStripeQuickBooksPush(input: {
     DepositToAccountRef: { value: depositAccountId ?? "" },
     PaymentMethodRef: paymentMethodId ? { value: paymentMethodId } : undefined,
     CustomerMemo: customerMemo ? { value: customerMemo } : undefined,
+    BillEmail: memberEmail ? { Address: memberEmail } : undefined,
     Line: [
       {
         DetailType: "SalesItemLineDetail",
@@ -262,7 +274,6 @@ export function planStripeQuickBooksPush(input: {
   const ready = issues.length === 0 && pushCheck.ok;
 
   return {
-    pushRuleId: rule.id,
     salesReceipt,
     grossAmountMajor: amounts.grossMajor,
     lineAmountMajor: amounts.lineAmountMajor,
@@ -277,7 +288,6 @@ export function planStripeQuickBooksPush(input: {
 
 export async function planStripeQuickBooksPushForTransaction(input: {
   transaction: Parameters<typeof planStripeQuickBooksPush>[0]["transaction"];
-  pushRules: StripeQuickBooksPushRuleRecord[];
 }): Promise<StripeQuickBooksPushPlan> {
   const [stripeQb, qbItem, product, { taxCodes }, { paymentMethods }] =
     await Promise.all([
@@ -296,11 +306,14 @@ export async function planStripeQuickBooksPushForTransaction(input: {
       input.transaction.productVatRatePercent ??
       product?.vatRatePercent ??
       0,
+    productQuickbooksTaxCodeId:
+      input.transaction.productQuickbooksTaxCodeId ??
+      product?.quickbooksTaxCodeId ??
+      null,
   };
 
   const plan = planStripeQuickBooksPush({
     transaction,
-    pushRules: input.pushRules,
     stripeQb,
     qbItem,
   });

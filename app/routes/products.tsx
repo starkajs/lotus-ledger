@@ -4,11 +4,13 @@ import type { Route } from "./+types/products";
 import { ActionToast } from "~/components/action-toast";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
+import { listQuickBooksTaxCodes } from "~/lib/quickbooks-master-data.server";
 import {
   countStripeTransactionsPerProduct,
   createProduct,
   deleteProduct,
   listProducts,
+  parseQuickbooksTaxCodeId,
   parseVatRatePercent,
   updateProduct,
 } from "~/lib/products.server";
@@ -23,11 +25,19 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
-  const [products, stripeTransactionCountByProductId] = await Promise.all([
-    listProducts(),
-    countStripeTransactionsPerProduct(),
-  ]);
-  return { products, stripeTransactionCountByProductId };
+  const [products, stripeTransactionCountByProductId, qbTaxCodes] =
+    await Promise.all([
+      listProducts(),
+      countStripeTransactionsPerProduct(),
+      listQuickBooksTaxCodes(),
+    ]);
+  const activeTaxCodes = qbTaxCodes.taxCodes.filter((t) => t.active);
+  return {
+    products,
+    stripeTransactionCountByProductId,
+    qbConnected: qbTaxCodes.connected,
+    taxCodes: activeTaxCodes,
+  };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -46,11 +56,15 @@ export async function action({ request }: Route.ActionArgs) {
     if (!vatParsed.ok) {
       return { scope: "create" as const, error: vatParsed.error };
     }
+    const quickbooksTaxCodeId = parseQuickbooksTaxCodeId(
+      String(form.get("quickbooksTaxCodeId") ?? ""),
+    );
     try {
       await createProduct({
         code,
         name,
         quickbooksItemId: quickbooksItemId || null,
+        quickbooksTaxCodeId,
         vatRatePercent: vatParsed.value,
       });
       return { scope: "create" as const, success: true as const };
@@ -74,9 +88,13 @@ export async function action({ request }: Route.ActionArgs) {
     if (!vatParsed.ok) {
       return { scope: "update" as const, error: vatParsed.error };
     }
+    const quickbooksTaxCodeId = parseQuickbooksTaxCodeId(
+      String(form.get("quickbooksTaxCodeId") ?? ""),
+    );
     await updateProduct(id, {
       name,
       quickbooksItemId: quickbooksItemId || null,
+      quickbooksTaxCodeId,
       vatRatePercent: vatParsed.value,
       isActive,
     });
@@ -110,7 +128,8 @@ export default function ProductsPage({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { products, stripeTransactionCountByProductId } = loaderData;
+  const { products, stripeTransactionCountByProductId, qbConnected, taxCodes } =
+    loaderData;
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -133,7 +152,7 @@ export default function ProductsPage({
   return (
     <AppPage
       title="Products"
-      description="Lotus product catalog. Each product maps to one QuickBooks item and a VAT rate (default 0%)."
+      description="Lotus product catalog. Map each product to a QuickBooks item, VAT %, and QuickBooks VAT code for Sales Receipt push."
       actions={
         <Link
           to="/products/rules"
@@ -147,6 +166,26 @@ export default function ProductsPage({
 
       <section className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-4 sm:p-6">
         <h2 className="text-sm font-medium text-dark">Add product</h2>
+        {!qbConnected && (
+          <p className="mt-2 text-xs text-maroon">
+            Connect QuickBooks to pick VAT codes.{" "}
+            <Link to="/integrations/quickbooks" className="text-teal underline">
+              QuickBooks settings
+            </Link>
+          </p>
+        )}
+        {qbConnected && taxCodes.length === 0 && (
+          <p className="mt-2 text-xs text-maroon">
+            No VAT codes synced yet.{" "}
+            <Link
+              to="/integrations/quickbooks/tax-codes"
+              className="text-teal underline"
+            >
+              Sync VAT codes
+            </Link>{" "}
+            under QuickBooks.
+          </p>
+        )}
         <Form method="post" className="mt-3 flex flex-wrap items-end gap-3">
           <input type="hidden" name="intent" value="create" />
           <label className="flex flex-col gap-0.5 text-xs">
@@ -221,6 +260,7 @@ export default function ProductsPage({
               <th className="px-3 py-2 font-medium">Name</th>
               <th className="px-3 py-2 font-medium w-[10rem]">QuickBooks item</th>
               <th className="px-3 py-2 font-medium w-[5rem]">VAT %</th>
+              <th className="px-3 py-2 font-medium min-w-[10rem]">QB VAT code</th>
               <th className="px-3 py-2 font-medium w-[5rem]">Active</th>
               <th className="px-3 py-2 font-medium w-[5rem] text-right">Save</th>
               <th className="px-3 py-2 font-medium w-[5rem] text-right">Delete</th>
@@ -230,7 +270,7 @@ export default function ProductsPage({
             {products.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-3 py-6 text-center text-sm text-ink-muted"
                 >
                   No products yet. Add one above.
@@ -278,6 +318,22 @@ export default function ProductsPage({
                         aria-label={`VAT rate for ${p.code}`}
                         className="w-full max-w-[5rem] rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1 text-sm font-mono text-right"
                       />
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        form={formId}
+                        name="quickbooksTaxCodeId"
+                        defaultValue={p.quickbooksTaxCodeId ?? ""}
+                        aria-label={`QuickBooks VAT code for ${p.code}`}
+                        className="w-full min-w-[10rem] rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1 text-sm"
+                      >
+                        <option value="">Select…</option>
+                        {taxCodes.map((t) => (
+                          <option key={t.quickbooksId} value={t.quickbooksId}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td className="px-3 py-2">
                       <label className="flex items-center gap-1.5 text-xs text-ink-muted">

@@ -35,25 +35,28 @@ export function extractClassRefFromItemRaw(
   return quickbooksRefId(raw.ClassRef);
 }
 
+export type QuickBooksPushTaxCodeSource = "product" | "item";
+
 export function resolveStripeQuickBooksPushTaxCode(input: {
-  ruleTaxCodeId: string | null;
+  /** Lotus product `quickbooks_tax_code_id` (preferred). */
+  productTaxCodeId: string | null;
+  /** Fallback from synced QB item when product has no code. */
   itemSalesTaxCodeId: string | null;
-  vatRatePercent: number;
 }): {
   taxCodeId: string | null;
-  source: "rule" | "item" | null;
+  source: QuickBooksPushTaxCodeSource | null;
 } {
-  if (input.ruleTaxCodeId?.trim()) {
-    return { taxCodeId: input.ruleTaxCodeId.trim(), source: "rule" };
+  if (input.productTaxCodeId?.trim()) {
+    return {
+      taxCodeId: input.productTaxCodeId.trim(),
+      source: "product",
+    };
   }
   if (input.itemSalesTaxCodeId?.trim()) {
     return {
       taxCodeId: input.itemSalesTaxCodeId.trim(),
       source: "item",
     };
-  }
-  if (input.vatRatePercent > 0) {
-    return { taxCodeId: null, source: null };
   }
   return { taxCodeId: null, source: null };
 }

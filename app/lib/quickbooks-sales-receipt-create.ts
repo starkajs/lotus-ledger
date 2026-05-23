@@ -28,6 +28,8 @@ export type QuickBooksSalesReceiptLine = {
 
 /** Body for POST /v3/company/{realmId}/salesreceipt?minorversion=65 */
 export type QuickBooksSalesReceiptCreate = {
+  /** UK/EU: `TaxExcluded` when line amounts are net ex-VAT. */
+  GlobalTaxCalculation?: "TaxExcluded" | "TaxInclusive" | "NotApplicable";
   TxnDate: string;
   /** Payment intent id — matches synced `tracking_num` on imported receipts. */
   TrackingNum?: string;

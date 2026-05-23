@@ -1,6 +1,9 @@
-import { and, count, desc, eq, gte, lt, max, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt, max, notExists, sql } from "drizzle-orm";
 import { getDb } from "~/db";
-import { quickbooksSalesReceipts } from "~/db/schema";
+import {
+  quickbooksSalesReceipts,
+  stripeBalanceTransactions,
+} from "~/db/schema";
 import type { QuickBooksMasterDataSyncResult } from "./quickbooks-master-data.server";
 import {
   extractLineItemsFromQbSalesReceipt,
@@ -154,6 +157,10 @@ function salesReceiptSyncSinceDate(days = QUICKBOOKS_SALES_RECEIPT_SYNC_DAYS): s
 
 function salesReceiptSyncQuery(days = QUICKBOOKS_SALES_RECEIPT_SYNC_DAYS): string {
   const since = salesReceiptSyncSinceDate(days);
+  return salesReceiptSyncQuerySince(since);
+}
+
+function salesReceiptSyncQuerySince(since: string): string {
   return `select * from SalesReceipt where TxnDate >= '${since}' orderby TxnDate desc`;
 }
 
@@ -310,11 +317,22 @@ async function resolveRealmId(): Promise<string> {
  * Upsert sales receipts by (realm_id, quickbooks_id): update if exists, insert if new.
  * Only fetches TxnDate within the last QUICKBOOKS_SALES_RECEIPT_SYNC_DAYS days from QuickBooks.
  */
-async function syncQuickBooksSalesReceiptsInner(): Promise<QuickBooksSalesReceiptSyncResult> {
+async function syncQuickBooksSalesReceiptsInner(options?: {
+  sinceDate?: string;
+}): Promise<QuickBooksSalesReceiptSyncResult> {
   const realmId = await resolveRealmId();
-  const sinceDate = salesReceiptSyncSinceDate();
+  const sinceDate = options?.sinceDate ?? salesReceiptSyncSinceDate();
+  const daysLimit = options?.sinceDate
+    ? Math.max(
+        1,
+        Math.ceil(
+          (Date.now() - new Date(`${sinceDate}T00:00:00Z`).getTime()) /
+            (24 * 60 * 60 * 1000),
+        ),
+      )
+    : QUICKBOOKS_SALES_RECEIPT_SYNC_DAYS;
   const rows = await queryQuickBooksAll<QbSalesReceiptRow>(
-    salesReceiptSyncQuery(),
+    salesReceiptSyncQuerySince(sinceDate),
     "SalesReceipt",
   );
   const db = getDb();
@@ -379,7 +397,7 @@ async function syncQuickBooksSalesReceiptsInner(): Promise<QuickBooksSalesReceip
     updated,
     total: rows.length,
     syncedAt: syncedAt.toISOString(),
-    daysLimit: QUICKBOOKS_SALES_RECEIPT_SYNC_DAYS,
+    daysLimit,
     sinceDate,
     tombstoned: tombstonedRows.length,
   };
@@ -398,6 +416,66 @@ export async function syncQuickBooksSalesReceipts(
     },
     () => syncQuickBooksSalesReceiptsInner(),
   );
+}
+
+/** Sync sales receipts with TxnDate on or after `sinceDate` (YYYY-MM-DD). */
+export async function syncQuickBooksSalesReceiptsSince(
+  sinceDate: string,
+  audit?: IntegrationAuditContext,
+): Promise<QuickBooksSalesReceiptSyncResult> {
+  const ctx = audit ?? { triggeredBy: "cli" as const };
+  return runIntegrationJob(
+    {
+      jobType: "quickbooks_sales_receipts_sync",
+      triggeredBy: ctx.triggeredBy,
+      userId: ctx.userId,
+      options: { sinceDate },
+    },
+    () => syncQuickBooksSalesReceiptsInner({ sinceDate }),
+  );
+}
+
+/** Remove synced receipts with no Stripe row pointing at their QuickBooks Id. */
+export async function deleteQuickBooksSalesReceiptsWithoutStripeLink(): Promise<number> {
+  const db = getDb();
+  const deleted = await db
+    .delete(quickbooksSalesReceipts)
+    .where(
+      notExists(
+        db
+          .select({ id: stripeBalanceTransactions.id })
+          .from(stripeBalanceTransactions)
+          .where(
+            eq(
+              stripeBalanceTransactions.quickbooksSalesReceiptId,
+              quickbooksSalesReceipts.quickbooksId,
+            ),
+          ),
+      ),
+    )
+    .returning({ id: quickbooksSalesReceipts.id });
+  return deleted.length;
+}
+
+export async function countQuickBooksSalesReceiptsWithoutStripeLink(): Promise<number> {
+  const db = getDb();
+  const [{ value }] = await db
+    .select({ value: count() })
+    .from(quickbooksSalesReceipts)
+    .where(
+      notExists(
+        db
+          .select({ id: stripeBalanceTransactions.id })
+          .from(stripeBalanceTransactions)
+          .where(
+            eq(
+              stripeBalanceTransactions.quickbooksSalesReceiptId,
+              quickbooksSalesReceipts.quickbooksId,
+            ),
+          ),
+      ),
+    );
+  return value;
 }
 
 export type ListQuickBooksSalesReceiptsOptions = {
@@ -516,6 +594,43 @@ export async function getQuickBooksSalesReceiptById(
 }
 
 /** Lookup synced receipt by QuickBooks entity `Id` (optionally scoped to realm). */
+/** Import a Sales Receipt returned from the QuickBooks create API into Lotus. */
+export async function upsertQuickBooksSalesReceiptFromApi(
+  salesReceipt: QbSalesReceiptRow | Record<string, unknown>,
+): Promise<QuickBooksSalesReceiptRecord> {
+  const realmId = await resolveRealmId();
+  const quickbooksId = (salesReceipt as QbSalesReceiptRow).Id?.trim();
+  if (!quickbooksId) {
+    throw new Error("QuickBooks sales receipt response missing Id");
+  }
+
+  const db = getDb();
+  const syncedAt = new Date();
+  const values = mapQbRowToValues(
+    realmId,
+    salesReceipt as QbSalesReceiptRow,
+    syncedAt,
+  );
+  const { realmId: _realm, quickbooksId: _qbId, ...updateSet } = values;
+
+  const [row] = await db
+    .insert(quickbooksSalesReceipts)
+    .values({
+      ...values,
+      createdAt: syncedAt,
+    })
+    .onConflictDoUpdate({
+      target: [
+        quickbooksSalesReceipts.realmId,
+        quickbooksSalesReceipts.quickbooksId,
+      ],
+      set: updateSet,
+    })
+    .returning();
+
+  return rowToRecord(row!);
+}
+
 export async function getQuickBooksSalesReceiptByQuickbooksId(
   quickbooksId: string,
   realmId?: string,

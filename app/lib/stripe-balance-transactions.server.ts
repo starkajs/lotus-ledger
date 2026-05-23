@@ -71,6 +71,7 @@ export type StripeBalanceTransactionRecord = {
   productCode: string | null;
   productName: string | null;
   productQuickbooksItemId: string | null;
+  productQuickbooksTaxCodeId: string | null;
   productVatRatePercent: number;
   productMatchRuleId: string | null;
   productMatchStatus: ProductMatchStatus | null;
@@ -182,6 +183,7 @@ function rowToRecord(
     code: string | null;
     name: string | null;
     quickbooksItemId: string | null;
+    quickbooksTaxCodeId: string | null;
     vatRatePercent: number | null;
   } | null,
   linkedWc?: {
@@ -223,6 +225,7 @@ function rowToRecord(
     productCode: product?.code ?? null,
     productName: product?.name ?? null,
     productQuickbooksItemId: product?.quickbooksItemId ?? null,
+    productQuickbooksTaxCodeId: product?.quickbooksTaxCodeId ?? null,
     productVatRatePercent: product?.vatRatePercent ?? 0,
     productMatchRuleId: row.productMatchRuleId,
     productMatchStatus: (row.productMatchStatus as ProductMatchStatus | null) ?? null,
@@ -450,28 +453,50 @@ export async function listStripeTransactionCurrencies(
   return rows.map((row) => row.currency.toUpperCase());
 }
 
-export async function listStripeBalanceTransactions(
-  options: ListStripeBalanceTransactionsOptions = {},
-): Promise<ListStripeBalanceTransactionsResult> {
-  const pageSize = options.pageSize ?? STRIPE_TRANSACTIONS_PAGE_SIZE;
-  const page = Math.max(1, options.page ?? 1);
-  const where = buildListWhere(options);
+type StripeBalanceTransactionListRow = {
+  transaction: typeof stripeBalanceTransactions.$inferSelect;
+  memberEmail: string | null;
+  memberName: string | null;
+  productCode: string | null;
+  productName: string | null;
+  productQuickbooksItemId: string | null;
+  productQuickbooksTaxCodeId: string | null;
+  productVatRatePercent: number | null;
+  linkedWcOrderId: string | null;
+  linkedWcOrderNumber: string | null;
+  linkedWcWcOrderId: number | null;
+};
 
+function mapStripeBalanceTransactionListRow(
+  row: StripeBalanceTransactionListRow,
+): StripeBalanceTransactionRecord {
+  return rowToRecord(
+    row.transaction,
+    { email: row.memberEmail, name: row.memberName },
+    {
+      code: row.productCode,
+      name: row.productName,
+      quickbooksItemId: row.productQuickbooksItemId,
+      quickbooksTaxCodeId: row.productQuickbooksTaxCodeId,
+      vatRatePercent: row.productVatRatePercent,
+    },
+    row.linkedWcOrderId
+      ? {
+          id: row.linkedWcOrderId,
+          orderNumber: row.linkedWcOrderNumber,
+          wcOrderId: row.linkedWcWcOrderId!,
+        }
+      : null,
+  );
+}
+
+async function fetchStripeBalanceTransactionListRows(
+  where: ReturnType<typeof buildListWhere>,
+  pagination?: { limit: number; offset: number },
+): Promise<StripeBalanceTransactionListRow[]> {
   const db = getDb();
-
   const wcJoin = stripeTransactionMatchesWooCommerceOrder();
-
-  const [{ value: total }] = await db
-    .select({ value: count() })
-    .from(stripeBalanceTransactions)
-    .leftJoin(woocommerceOrders, wcJoin)
-    .where(where);
-
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const safePage = Math.min(page, totalPages);
-  const offset = (safePage - 1) * pageSize;
-
-  const rows = await db
+  const base = db
     .select({
       transaction: stripeBalanceTransactions,
       memberEmail: communityMembers.email,
@@ -479,6 +504,7 @@ export async function listStripeBalanceTransactions(
       productCode: products.code,
       productName: products.name,
       productQuickbooksItemId: products.quickbooksItemId,
+      productQuickbooksTaxCodeId: products.quickbooksTaxCodeId,
       productVatRatePercent: products.vatRatePercent,
       linkedWcOrderId: woocommerceOrders.id,
       linkedWcOrderNumber: woocommerceOrders.orderNumber,
@@ -492,34 +518,66 @@ export async function listStripeBalanceTransactions(
     .leftJoin(products, eq(stripeBalanceTransactions.productId, products.id))
     .leftJoin(woocommerceOrders, wcJoin)
     .where(where)
-    .orderBy(desc(stripeBalanceTransactions.stripeCreatedAt))
-    .limit(pageSize)
-    .offset(offset);
+    .orderBy(desc(stripeBalanceTransactions.stripeCreatedAt));
+
+  if (pagination) {
+    return base.limit(pagination.limit).offset(pagination.offset);
+  }
+  return base;
+}
+
+export async function listStripeBalanceTransactions(
+  options: ListStripeBalanceTransactionsOptions = {},
+): Promise<ListStripeBalanceTransactionsResult> {
+  const pageSize = options.pageSize ?? STRIPE_TRANSACTIONS_PAGE_SIZE;
+  const page = Math.max(1, options.page ?? 1);
+  const where = buildListWhere(options);
+  const db = getDb();
+  const wcJoin = stripeTransactionMatchesWooCommerceOrder();
+
+  const [{ value: total }] = await db
+    .select({ value: count() })
+    .from(stripeBalanceTransactions)
+    .leftJoin(woocommerceOrders, wcJoin)
+    .where(where);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const offset = (safePage - 1) * pageSize;
+
+  const rows = await fetchStripeBalanceTransactionListRows(where, {
+    limit: pageSize,
+    offset,
+  });
 
   return {
-    transactions: rows.map((row) =>
-      rowToRecord(
-        row.transaction,
-        { email: row.memberEmail, name: row.memberName },
-        {
-          code: row.productCode,
-          name: row.productName,
-          quickbooksItemId: row.productQuickbooksItemId,
-          vatRatePercent: row.productVatRatePercent,
-        },
-        row.linkedWcOrderId
-          ? {
-              id: row.linkedWcOrderId,
-              orderNumber: row.linkedWcOrderNumber,
-              wcOrderId: row.linkedWcWcOrderId!,
-            }
-          : null,
-      ),
-    ),
+    transactions: rows.map((row) => mapStripeBalanceTransactionListRow(row)),
     total,
     page: safePage,
     pageSize,
     totalPages,
+  };
+}
+
+/** All rows matching list filters (no pagination) — for bulk QuickBooks push. */
+export async function listAllStripeBalanceTransactions(
+  options: Omit<ListStripeBalanceTransactionsOptions, "page" | "pageSize"> = {},
+): Promise<{ transactions: StripeBalanceTransactionRecord[]; total: number }> {
+  const where = buildListWhere(options);
+  const db = getDb();
+  const wcJoin = stripeTransactionMatchesWooCommerceOrder();
+
+  const [{ value: total }] = await db
+    .select({ value: count() })
+    .from(stripeBalanceTransactions)
+    .leftJoin(woocommerceOrders, wcJoin)
+    .where(where);
+
+  const rows = await fetchStripeBalanceTransactionListRows(where);
+
+  return {
+    transactions: rows.map((row) => mapStripeBalanceTransactionListRow(row)),
+    total,
   };
 }
 
@@ -813,6 +871,7 @@ function rowToTransactionDetail(row: {
   productCode: string | null;
   productName: string | null;
   productQuickbooksItemId: string | null;
+  productQuickbooksTaxCodeId: string | null;
   productVatRatePercent: number | null;
 }): StripeBalanceTransactionDetail {
   return {
@@ -823,6 +882,7 @@ function rowToTransactionDetail(row: {
         code: row.productCode,
         name: row.productName,
         quickbooksItemId: row.productQuickbooksItemId,
+        quickbooksTaxCodeId: row.productQuickbooksTaxCodeId,
         vatRatePercent: row.productVatRatePercent,
       },
     ),
@@ -845,6 +905,7 @@ async function fetchStripeBalanceTransactionDetail(
       productCode: products.code,
       productName: products.name,
       productQuickbooksItemId: products.quickbooksItemId,
+      productQuickbooksTaxCodeId: products.quickbooksTaxCodeId,
       productVatRatePercent: products.vatRatePercent,
     })
     .from(stripeBalanceTransactions)
@@ -913,6 +974,41 @@ export async function setStripeBalanceTransactionQuickBooksSalesReceipt(
       updatedAt: now,
     })
     .where(eq(stripeBalanceTransactions.id, lotusTransactionId));
+}
+
+/** Clear pushed state so the transaction can be pushed to QuickBooks again. */
+export async function clearStripeBalanceTransactionQuickBooksPush(
+  lotusTransactionId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      pushedToQuickbooks: stripeBalanceTransactions.pushedToQuickbooks,
+      quickbooksSalesReceiptId: stripeBalanceTransactions.quickbooksSalesReceiptId,
+    })
+    .from(stripeBalanceTransactions)
+    .where(eq(stripeBalanceTransactions.id, lotusTransactionId))
+    .limit(1);
+
+  if (!row) {
+    return { ok: false, reason: "Transaction not found" };
+  }
+  if (row.pushedToQuickbooks !== true && !row.quickbooksSalesReceiptId) {
+    return { ok: false, reason: "Transaction is not marked as pushed to QuickBooks" };
+  }
+
+  const now = new Date();
+  await db
+    .update(stripeBalanceTransactions)
+    .set({
+      quickbooksSalesReceiptId: null,
+      pushedToQuickbooks: false,
+      quickbooksPushedAt: null,
+      updatedAt: now,
+    })
+    .where(eq(stripeBalanceTransactions.id, lotusTransactionId));
+
+  return { ok: true };
 }
 
 export async function getStripeBalanceTransactionByQuickBooksSalesReceiptId(
@@ -1039,6 +1135,7 @@ export async function listStripeBalanceTransactionsForMember(
       productCode: products.code,
       productName: products.name,
       productQuickbooksItemId: products.quickbooksItemId,
+      productQuickbooksTaxCodeId: products.quickbooksTaxCodeId,
       productVatRatePercent: products.vatRatePercent,
     })
     .from(stripeBalanceTransactions)
@@ -1065,6 +1162,7 @@ export async function listStripeBalanceTransactionsForMember(
           code: row.productCode,
           name: row.productName,
           quickbooksItemId: row.productQuickbooksItemId,
+          quickbooksTaxCodeId: row.productQuickbooksTaxCodeId,
           vatRatePercent: row.productVatRatePercent,
         },
       ),

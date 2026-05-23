@@ -7,7 +7,7 @@ type BusyOverlayProps = {
 
 /**
  * Blocks the UI during long server actions (sync, classify, etc.).
- * Rendered at layout level while React Router navigation.state === "submitting".
+ * Rendered at layout level while a long-running form POST is in flight.
  */
 export function BusyOverlay({ message }: BusyOverlayProps) {
   useEffect(() => {

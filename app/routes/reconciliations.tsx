@@ -22,6 +22,12 @@ const reconciliations = [
     description:
       "Compare synced WC orders and Stripe balance transactions in a date range. See matched pairs, unmatched orders by status, and unmatched Stripe by Lotus product.",
   },
+  {
+    to: "/reconciliations/stripe-qb",
+    title: "Stripe ↔ QuickBooks",
+    description:
+      "Compare Stripe balance transactions and synced QuickBooks sales receipts in Lotus Ledger. Matched pairs, unpushed or unlinked Stripe, and QB receipts without a Stripe link.",
+  },
 ] as const;
 
 export default function ReconciliationsPage({}: Route.ComponentProps) {

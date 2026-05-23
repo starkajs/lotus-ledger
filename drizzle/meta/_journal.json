@@ -239,6 +239,20 @@
       "when": 1782700000000,
       "tag": "0033_stripe_quickbooks_sales_receipt_link",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1782800000000,
+      "tag": "0034_products_quickbooks_tax_code",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1782900000000,
+      "tag": "0035_drop_stripe_quickbooks_push_rules",
+      "breakpoints": true
     }
   ]
 }

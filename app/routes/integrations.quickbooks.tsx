@@ -309,6 +309,14 @@ APP_URL=http://localhost:5174`}
                   </li>
                   <li>
                     <Link
+                      to="/integrations/quickbooks/tax-codes"
+                      className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 hover:bg-surface"
+                    >
+                      VAT codes
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
                       to="/integrations/quickbooks/items"
                       className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 hover:bg-surface"
                     >
@@ -328,7 +336,7 @@ APP_URL=http://localhost:5174`}
                       to="/integrations/stripe/transactions/quickbooks-push"
                       className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 hover:bg-surface"
                     >
-                      Stripe → QB push rules
+                      Stripe → QB push
                     </Link>
                   </li>
                 </ul>

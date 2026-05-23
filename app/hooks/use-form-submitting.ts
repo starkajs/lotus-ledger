@@ -1,3 +1,4 @@
+import { getFormIntent, isFormSubmissionInFlight } from "~/lib/form-navigation";
 import { useNavigation } from "react-router";
 
 export type FormSubmittingOptions = {
@@ -10,19 +11,16 @@ export type FormSubmittingOptions = {
 
 export function useFormSubmitting(options: FormSubmittingOptions = {}): boolean {
   const navigation = useNavigation();
-  if (navigation.state !== "submitting" || !navigation.formData) {
+  if (!isFormSubmissionInFlight(navigation)) {
     return false;
   }
 
-  if (
-    options.intent != null &&
-    navigation.formData.get("intent") !== options.intent
-  ) {
+  if (options.intent != null && getFormIntent(navigation) !== options.intent) {
     return false;
   }
 
   if (options.matchField != null) {
-    return navigation.formData.get(options.matchField) === options.matchValue;
+    return navigation.formData!.get(options.matchField) === options.matchValue;
   }
 
   return true;

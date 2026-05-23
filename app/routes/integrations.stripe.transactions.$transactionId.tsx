@@ -15,9 +15,9 @@ import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction
 import { getProductMatchRuleById, listProducts } from "~/lib/products.server";
 import { getQuickBooksSalesReceiptByQuickbooksId } from "~/lib/quickbooks-sales-receipts.server";
 import { getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
+import { clearStripeTransactionQuickBooksPush } from "~/lib/stripe-quickbooks-push-execute.server";
 import { getStripeBalanceTransactionById } from "~/lib/stripe-balance-transactions.server";
 import { planStripeQuickBooksPushForTransaction } from "~/lib/stripe-quickbooks-push-plan.server";
-import { listActiveStripeQuickBooksPushRules } from "~/lib/stripe-quickbooks-push-rules.server";
 import { requireUser } from "~/lib/session.server";
 import {
   findLinkedWooCommerceOrderForStripeTransaction,
@@ -95,7 +95,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const pushCheck = canPushTransactionToQuickbooks(tx);
   const pushPlan = await planStripeQuickBooksPushForTransaction({
     transaction: tx,
-    pushRules: await listActiveStripeQuickBooksPushRules(),
   });
   const productSignals = extractStripeTransactionProductSignals({
     stripeRaw: tx.stripeRaw,
@@ -213,6 +212,14 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
     if (!result.ok) {
       return { scope: "wcProduct" as const, error: result.reason };
+    }
+    return redirect(redirectUrl);
+  }
+
+  if (intent === "clear-qb-push") {
+    const result = await clearStripeTransactionQuickBooksPush(params.transactionId);
+    if (!result.ok) {
+      return { scope: "clearQbPush" as const, error: result.reason };
     }
     return redirect(redirectUrl);
   }
@@ -419,6 +426,9 @@ export default function StripeTransactionDetailPage({
         {actionData?.scope === "product" && actionData.error && (
           <p className="mt-2 text-sm text-maroon">{actionData.error}</p>
         )}
+        {actionData?.scope === "clearQbPush" && actionData.error && (
+          <p className="mt-2 text-sm text-maroon">{actionData.error}</p>
+        )}
         <DetailRow label="Matched by rule">
           {tx.productMatchStatus === "manual" ? (
             <span className="text-ink-muted">Manual assignment (no rule)</span>
@@ -435,9 +445,7 @@ export default function StripeTransactionDetailPage({
         <p className="mt-3 text-xs text-ink-muted">
           QuickBooks push:{" "}
           {pushPlan.ready ? (
-            <span className="text-jade">Ready (product + push rule)</span>
-          ) : pushCheck.ok && !pushPlan.pushRuleId ? (
-            <span className="text-maroon">No push rule matched</span>
+            <span className="text-jade">Ready (Stripe account + product)</span>
           ) : (
             <span className="text-maroon">
               {[pushCheck.ok ? null : pushCheck.reason, ...pushPlan.issues]
@@ -582,18 +590,33 @@ export default function StripeTransactionDetailPage({
             {formatDateTime(tx.availableOn)}
           </DetailRow>
           <DetailRow label="QuickBooks">
-            {quickbooksPushStatus(tx.pushedToQuickbooks) === "yes" ? (
-              <span>
-                Pushed
-                {tx.quickbooksPushedAt
-                  ? ` · ${formatDateTime(tx.quickbooksPushedAt)}`
-                  : ""}
-              </span>
-            ) : quickbooksPushStatus(tx.pushedToQuickbooks) === "na" ? (
-              "N/A (before 1 Apr 2026)"
-            ) : (
-              "Not pushed"
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {quickbooksPushStatus(tx.pushedToQuickbooks) === "yes" ? (
+                <span>
+                  Pushed
+                  {tx.quickbooksPushedAt
+                    ? ` · ${formatDateTime(tx.quickbooksPushedAt)}`
+                    : ""}
+                </span>
+              ) : quickbooksPushStatus(tx.pushedToQuickbooks) === "na" ? (
+                "N/A (before 1 Apr 2026)"
+              ) : (
+                "Not pushed"
+              )}
+              {tx.pushedToQuickbooks === true || tx.quickbooksSalesReceiptId ? (
+                <Form method="post" action={postAction} className="inline">
+                  <input type="hidden" name="returnTo" value={returnTo} />
+                  <SubmitButton
+                    intent="clear-qb-push"
+                    variant="ghost"
+                    className="!px-0 !py-0 text-xs"
+                    loadingLabel="Clearing…"
+                  >
+                    Clear pushed flag
+                  </SubmitButton>
+                </Form>
+              ) : null}
+            </div>
           </DetailRow>
           {tx.quickbooksSalesReceiptId ? (
             <DetailRow label="QB sales receipt">

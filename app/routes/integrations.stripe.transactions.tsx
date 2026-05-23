@@ -11,6 +11,7 @@ import { SubmitButton } from "~/components/submit-button";
 import { formatCalendarDateShort } from "~/lib/date-range-filters";
 import { formatMoneyMinor } from "~/lib/money";
 import {
+  listAllStripeBalanceTransactions,
   listStripeBalanceTransactions,
   STRIPE_TRANSACTIONS_PAGE_SIZE,
   type StripeBalanceTransactionRecord,
@@ -18,6 +19,8 @@ import {
 import { requireUser } from "~/lib/session.server";
 import { listStripeConnections } from "~/lib/stripe-connections.server";
 import { classifyAllStripeTransactions } from "~/lib/product-classification.server";
+import { getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
+import { pushStripeBalanceTransactionsBulkToQuickBooks } from "~/lib/stripe-quickbooks-push-execute.server";
 import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
 import { STRIPE_APP_SYNC_DAYS } from "~/lib/stripe-sync.constants";
 import {
@@ -73,7 +76,7 @@ function MemberCell({ tx }: { tx: StripeBalanceTransactionRecord }) {
   if (href) {
     return (
       <Link to={href} className="text-teal hover:underline">
-        <span className="block truncate max-w-[10rem] text-dark">
+        <span className="block truncate text-dark">
           {tx.memberName ?? tx.memberEmail}
         </span>
         {tx.stripeCustomerId && (
@@ -128,7 +131,7 @@ function WcOrderCell({
   }
   if (tx.orderKey) {
     return (
-      <div className="max-w-[9rem]" title={tx.orderKey}>
+      <div className="min-w-0" title={tx.orderKey}>
         <span className="text-[10px] text-ink-faint">No WC match</span>
         <span className="block truncate font-mono text-[10px] text-ink-muted">
           {tx.orderKey}
@@ -162,11 +165,9 @@ function StripeTextHints({ fields }: { fields: StripeTextHintField[] }) {
   return (
     <div className="space-y-0.5 text-[10px] leading-snug">
       {fields.map((field) => (
-        <div key={field.label}>
+        <div key={field.label} className="min-w-0 break-words">
           <span className="font-medium text-ink-faint">{field.label}: </span>
-          <span className="whitespace-pre-wrap break-words text-ink-muted">
-            {field.value}
-          </span>
+          <span className="text-ink-muted">{field.value}</span>
         </div>
       ))}
     </div>
@@ -191,18 +192,23 @@ export async function loader({ request }: Route.LoaderArgs) {
   );
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
 
+  const listOptions = toListStripeBalanceTransactionOptions(filters);
   const txList = await listStripeBalanceTransactions({
-    ...toListStripeBalanceTransactionOptions(filters, page, STRIPE_TRANSACTIONS_PAGE_SIZE),
+    ...listOptions,
+    page,
+    pageSize: STRIPE_TRANSACTIONS_PAGE_SIZE,
   });
 
   const connectionLabels = Object.fromEntries(
     connections.map((c) => [c.id, c.label]),
   );
+  const qbConnected = Boolean(await getQuickBooksTokens());
 
   return {
     connections,
     ...filters,
     connectionLabels,
+    qbConnected,
     ...txList,
   };
 }
@@ -247,6 +253,36 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
+  if (intent === "push-qb-bulk") {
+    if (!(await getQuickBooksTokens())) {
+      return {
+        scope: "push-qb-bulk" as const,
+        error: "Connect QuickBooks before pushing",
+      };
+    }
+    const url = new URL(request.url);
+    const connections = await listStripeConnections();
+    const defaultAccount = connections[0]?.id ?? "";
+    const filters = parseStripeTransactionFiltersFromUrl(
+      url.searchParams,
+      defaultAccount,
+    );
+    try {
+      const { transactions } = await listAllStripeBalanceTransactions(
+        toListStripeBalanceTransactionOptions(filters),
+      );
+      const result = await pushStripeBalanceTransactionsBulkToQuickBooks(
+        transactions,
+      );
+      return { scope: "push-qb-bulk" as const, success: true as const, result };
+    } catch (err) {
+      return {
+        scope: "push-qb-bulk" as const,
+        error: err instanceof Error ? err.message : "Bulk push failed",
+      };
+    }
+  }
+
   return { scope: "unknown" as const, error: "Unknown action" };
 }
 
@@ -270,6 +306,7 @@ export default function StripeTransactionsPage({
     period,
     wcOrderSearch,
     wcLinked,
+    qbConnected,
   } = loaderData;
   const location = useLocation();
 
@@ -299,6 +336,9 @@ export default function StripeTransactionsPage({
   }
   const returnTo = `${location.pathname}${location.search}`;
   const showAccountColumn = connections.length > 1;
+  const tableColumnCount = showAccountColumn ? 11 : 10;
+  const hintLeadingColSpan = showAccountColumn ? 2 : 1;
+  const hintContentColSpan = tableColumnCount - hintLeadingColSpan;
 
   const syncResult =
     actionData?.scope === "sync" && actionData.success ? actionData.result : null;
@@ -312,6 +352,14 @@ export default function StripeTransactionsPage({
     actionData?.scope === "classify" && actionData.error
       ? actionData.error
       : null;
+  const bulkPushResult =
+    actionData?.scope === "push-qb-bulk" && actionData.success
+      ? actionData.result
+      : null;
+  const bulkPushError =
+    actionData?.scope === "push-qb-bulk" && actionData.error
+      ? actionData.error
+      : null;
 
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, total);
@@ -322,6 +370,7 @@ export default function StripeTransactionsPage({
     <AppPage
       title="Stripe transactions"
       description="Balance transactions synced from each connected Stripe account."
+      contentClassName="min-w-0"
       actions={
         connections.length > 0 ? (
             <div className="flex flex-wrap gap-2">
@@ -329,7 +378,7 @@ export default function StripeTransactionsPage({
                 to="/integrations/stripe/transactions/quickbooks-push"
                 className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 text-sm hover:bg-surface"
               >
-                QB push rules
+                QB push
               </Link>
               <Link
                 to={summaryHref}
@@ -378,6 +427,19 @@ export default function StripeTransactionsPage({
             >
               Re-classify
             </SubmitButton>
+          </Form>
+          <Form method="post" action={postAction} className="flex flex-wrap items-center gap-2">
+            <SubmitButton
+              intent="push-qb-bulk"
+              variant="pill"
+              loadingLabel="Pushing to QuickBooks…"
+              disabled={!qbConnected || total === 0}
+            >
+              Push filtered to QuickBooks
+            </SubmitButton>
+            <span className="text-xs text-ink-faint">
+              All {total} in filter · skips rows that are not ready
+            </span>
           </Form>
         </div>
       )}
@@ -457,6 +519,61 @@ export default function StripeTransactionsPage({
         <p role="alert" className="mt-4 text-sm text-maroon">
           {classifyError}
         </p>
+      )}
+
+      {bulkPushError && (
+        <p role="alert" className="mt-4 text-sm text-maroon">
+          {bulkPushError}
+        </p>
+      )}
+
+      {bulkPushResult && (
+        <div
+          role="status"
+          className="mt-4 rounded-jamyang border border-jade/40 bg-jade/5 p-4 text-sm"
+        >
+          <p className="font-medium text-dark">QuickBooks bulk push complete</p>
+          <ul className="mt-2 list-inside list-disc text-ink-muted">
+            <li>{bulkPushResult.matchedFilter} in current filter</li>
+            <li>{bulkPushResult.pushed} pushed</li>
+            <li>{bulkPushResult.skipped} skipped</li>
+            {bulkPushResult.failed > 0 && (
+              <li>{bulkPushResult.failed} failed (QuickBooks API)</li>
+            )}
+          </ul>
+          {bulkPushResult.skippedSample.length > 0 && (
+            <details className="mt-3 text-xs">
+              <summary className="cursor-pointer text-ink-muted">
+                Skipped examples (
+                {bulkPushResult.skipped > bulkPushResult.skippedSample.length
+                  ? `showing ${bulkPushResult.skippedSample.length} of ${bulkPushResult.skipped}`
+                  : bulkPushResult.skipped}
+                )
+              </summary>
+              <ul className="mt-2 space-y-1 font-mono text-[11px] text-ink-faint">
+                {bulkPushResult.skippedSample.map((row) => (
+                  <li key={row.stripeBalanceTransactionId}>
+                    {row.stripeBalanceTransactionId}: {row.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {bulkPushResult.failedSample.length > 0 && (
+            <details className="mt-3 text-xs">
+              <summary className="cursor-pointer text-maroon">
+                Failed examples
+              </summary>
+              <ul className="mt-2 space-y-1 font-mono text-[11px] text-maroon">
+                {bulkPushResult.failedSample.map((row) => (
+                  <li key={row.stripeBalanceTransactionId}>
+                    {row.stripeBalanceTransactionId}: {row.message}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
       )}
 
       {connections.length > 0 && (
@@ -555,24 +672,36 @@ export default function StripeTransactionsPage({
             </p>
           ) : (
             <>
-              <div className="mt-3 overflow-x-auto rounded-jamyang border border-sand-dark/50">
-                <table className="w-full min-w-[58rem] text-left text-xs">
+              <div className="mt-3 min-w-0 rounded-jamyang border border-sand-dark/50">
+                <table className="w-full table-fixed text-left text-xs">
+                  <colgroup>
+                    <col className="w-[4.25rem]" />
+                    {showAccountColumn ? <col className="w-[5.5rem]" /> : null}
+                    <col className="w-[18%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[10%]" />
+                    <col className="w-[4.75rem]" />
+                    <col className="w-[4.75rem]" />
+                    <col className="w-[4.75rem]" />
+                    <col className="w-[3.25rem]" />
+                    <col className="w-[3.25rem]" />
+                  </colgroup>
                   <thead className="bg-surface text-dark">
                     <tr>
-                      <th className="px-2 py-1.5 font-medium">Date</th>
+                      <th className="px-1.5 py-1.5 font-medium">Date</th>
                       {showAccountColumn && (
-                        <th className="px-2 py-1.5 font-medium">Account</th>
+                        <th className="px-1.5 py-1.5 font-medium">Account</th>
                       )}
-                      <th className="px-2 py-1.5 font-medium">Transaction</th>
-                      <th className="px-2 py-1.5 font-medium">WC order</th>
-                      <th className="px-2 py-1.5 font-medium">Customer</th>
-                      <th className="px-2 py-1.5 font-medium">Product</th>
-                      <th className="px-2 py-1.5 font-medium">CCY</th>
-                      <th className="px-2 py-1.5 font-medium text-right">Gross</th>
-                      <th className="px-2 py-1.5 font-medium text-right">Fee</th>
-                      <th className="px-2 py-1.5 font-medium text-right">Net</th>
-                      <th className="px-2 py-1.5 font-medium">QB</th>
-                      <th className="px-2 py-1.5 font-medium">
+                      <th className="px-1.5 py-1.5 font-medium">Transaction</th>
+                      <th className="px-1.5 py-1.5 font-medium">WC order</th>
+                      <th className="px-1.5 py-1.5 font-medium">Customer</th>
+                      <th className="px-1.5 py-1.5 font-medium">Product</th>
+                      <th className="px-1.5 py-1.5 font-medium text-right">Gross</th>
+                      <th className="px-1.5 py-1.5 font-medium text-right">Fee</th>
+                      <th className="px-1.5 py-1.5 font-medium text-right">Net</th>
+                      <th className="px-1.5 py-1.5 font-medium">QB</th>
+                      <th className="px-1.5 py-1.5 font-medium">
                         <span className="sr-only">Actions</span>
                       </th>
                     </tr>
@@ -587,56 +716,47 @@ export default function StripeTransactionsPage({
                           <tr
                             className={`group align-top hover:bg-sand/20 ${hasHints ? "" : "border-b border-sand-dark/30"}`}
                           >
-                            <td className="px-2 py-1.5 whitespace-nowrap text-ink-muted">
+                            <td className="min-w-0 px-1.5 py-1.5 whitespace-nowrap text-ink-muted">
                               {formatCalendarDateShort(tx.stripeCreatedAt)}
                             </td>
                             {showAccountColumn && (
-                              <td className="px-2 py-1.5 text-dark">
+                              <td className="min-w-0 truncate px-1.5 py-1.5 text-dark">
                                 {connectionLabels[tx.stripeConnectionId] ?? "—"}
                               </td>
                             )}
-                            <td className="px-2 py-1.5">
+                            <td className="min-w-0 px-1.5 py-1.5">
                               <div className="capitalize text-dark">{tx.type}</div>
-                              <div
-                                className="max-w-[12rem] truncate font-mono text-[10px] text-ink-faint"
-                                title={tx.stripeBalanceTransactionId}
-                              >
+                              <div className="mt-0.5 break-all font-mono text-[10px] text-ink-faint select-all">
                                 {tx.stripeBalanceTransactionId}
                               </div>
-                              {tx.stripePaymentIntentId && (
-                                <div
-                                  className="max-w-[12rem] truncate font-mono text-[10px] text-ink-faint"
-                                  title={tx.stripePaymentIntentId}
-                                >
+                              {tx.stripePaymentIntentId ? (
+                                <div className="mt-0.5 break-all font-mono text-[10px] text-ink-faint select-all">
                                   {tx.stripePaymentIntentId}
                                 </div>
-                              )}
+                              ) : null}
                             </td>
-                            <td className="px-2 py-1.5">
+                            <td className="min-w-0 px-1.5 py-1.5">
                               <WcOrderCell tx={tx} returnTo={returnTo} />
                             </td>
-                            <td className="px-2 py-1.5">
+                            <td className="min-w-0 px-1.5 py-1.5">
                               <MemberCell tx={tx} />
                             </td>
-                            <td className="px-2 py-1.5">
+                            <td className="min-w-0 truncate px-1.5 py-1.5">
                               <ProductCell tx={tx} />
                             </td>
-                            <td className="px-2 py-1.5 font-mono text-[10px] text-ink-muted uppercase">
-                              {tx.currency.toUpperCase()}
-                            </td>
-                            <td className="px-2 py-1.5 text-right font-mono text-dark whitespace-nowrap">
+                            <td className="min-w-0 px-1.5 py-1.5 text-right font-mono tabular-nums text-dark whitespace-nowrap">
                               {formatMoneyMinor(tx.amount, tx.currency)}
                             </td>
-                            <td className="px-2 py-1.5 text-right font-mono text-ink-muted whitespace-nowrap">
+                            <td className="min-w-0 px-1.5 py-1.5 text-right font-mono tabular-nums text-ink-muted whitespace-nowrap">
                               {formatMoneyMinor(tx.fee, tx.currency)}
                             </td>
-                            <td className="px-2 py-1.5 text-right font-mono text-dark whitespace-nowrap">
+                            <td className="min-w-0 px-1.5 py-1.5 text-right font-mono tabular-nums text-dark whitespace-nowrap">
                               {formatMoneyMinor(tx.net, tx.currency)}
                             </td>
-                            <td className="px-2 py-1.5">
+                            <td className="min-w-0 px-1.5 py-1.5">
                               <QuickbooksPushBadge pushed={tx.pushedToQuickbooks} />
                             </td>
-                            <td className="px-2 py-1.5 text-right">
+                            <td className="min-w-0 px-1.5 py-1.5 text-right">
                               <Link
                                 to={transactionDetailHref(tx.id, returnTo)}
                                 className="inline-flex rounded border border-sand-dark/50 px-2 py-0.5 text-[11px] font-medium text-teal hover:bg-surface"
@@ -647,22 +767,16 @@ export default function StripeTransactionsPage({
                           </tr>
                           {hasHints && (
                             <tr className="group border-b border-sand-dark/30 hover:bg-sand/20">
-                              <td className="px-2 pb-1.5 pt-0" />
-                              {showAccountColumn && (
-                                <td className="px-2 pb-1.5 pt-0" />
-                              )}
-                              <td className="px-2 pb-2 pt-0 align-top">
+                              <td
+                                colSpan={hintLeadingColSpan}
+                                className="px-1.5 pb-2 pt-0"
+                              />
+                              <td
+                                colSpan={hintContentColSpan}
+                                className="min-w-0 px-1.5 pb-2 pt-0 align-top"
+                              >
                                 <StripeTextHints fields={hintFields} />
                               </td>
-                              <td className="px-2 pb-1.5 pt-0" />
-                              <td className="px-2 pb-1.5 pt-0" />
-                              <td className="px-2 pb-1.5 pt-0" />
-                              <td className="px-2 pb-1.5 pt-0" />
-                              <td className="px-2 pb-1.5 pt-0" />
-                              <td className="px-2 pb-1.5 pt-0" />
-                              <td className="px-2 pb-1.5 pt-0" />
-                              <td className="px-2 pb-1.5 pt-0" />
-                              <td className="px-2 pb-1.5 pt-0" />
                             </tr>
                           )}
                         </Fragment>

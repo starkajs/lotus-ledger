@@ -15,6 +15,7 @@ export default [
     route("products/rules", "routes/products.rules.tsx"),
     route("reconciliations", "routes/reconciliations.tsx"),
     route("reconciliations/wc-stripe", "routes/reconciliations.wc-stripe.tsx"),
+    route("reconciliations/stripe-qb", "routes/reconciliations.stripe-qb.tsx"),
     route("users", "routes/users.tsx"),
     route("integrations/invite", "routes/integrations.invite.tsx"),
     route("integrations/jobs", "routes/integrations.jobs.tsx"),
@@ -43,6 +44,10 @@ export default [
     route(
       "integrations/quickbooks/classes",
       "routes/integrations.quickbooks.classes.tsx",
+    ),
+    route(
+      "integrations/quickbooks/tax-codes",
+      "routes/integrations.quickbooks.tax-codes.tsx",
     ),
     route(
       "integrations/quickbooks/items",

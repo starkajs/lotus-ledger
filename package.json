@@ -23,6 +23,7 @@
     "sync:woocommerce-orders": "npx tsx scripts/sync-woocommerce-orders.ts",
     "sync:woocommerce-products": "npx tsx scripts/sync-woocommerce-products.ts",
     "clear:qb-sales-receipts": "npx tsx scripts/clear-quickbooks-sales-receipts.ts",
+    "reimport:qb-sales-receipts": "npx tsx scripts/reimport-qb-sales-receipts.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {

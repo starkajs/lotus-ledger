@@ -128,6 +128,8 @@ export const products = pgTable("products", {
   code: text().notNull().unique(),
   name: text().notNull(),
   quickbooksItemId: text("quickbooks_item_id"),
+  /** QuickBooks TaxCode `Id` for Sales Receipt line VAT (UK required). */
+  quickbooksTaxCodeId: text("quickbooks_tax_code_id"),
   /** UK VAT rate as a percentage (e.g. 20 = 20%, 0 = zero-rated). */
   vatRatePercent: real("vat_rate_percent").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
@@ -148,33 +150,6 @@ export const productMatchRules = pgTable("product_match_rules", {
   pattern: text().notNull(),
   caseInsensitive: boolean("case_insensitive").notNull().default(true),
   isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-/**
- * Match Stripe balance txns to QuickBooks Sales Receipt field assignments (first match wins).
- * Product/item comes from product_match_rules + products.quickbooks_item_id.
- */
-export const stripeQuickbooksPushRules = pgTable("stripe_quickbooks_push_rules", {
-  id: uuid().primaryKey().defaultRandom(),
-  priority: integer().notNull().default(100),
-  field: text().notNull(),
-  matchType: text("match_type").notNull(),
-  pattern: text().notNull(),
-  caseInsensitive: boolean("case_insensitive").notNull().default(true),
-  isActive: boolean("is_active").notNull().default(true),
-  /** Fallback deposit account when not set on the Stripe connection. */
-  depositToAccountId: text("deposit_to_account_id"),
-  quickbooksClassId: text("quickbooks_class_id"),
-  paymentMethodId: text("payment_method_id"),
-  amountSource: text("amount_source").notNull().default("net"),
-  customerMode: text("customer_mode").notNull().default("omit"),
-  customerQuickbooksId: text("customer_quickbooks_id"),
-  /** QB TaxCode Id for `SalesItemLineDetail.TaxCodeRef` (VAT). */
-  taxCodeId: text("tax_code_id"),
-  lineDescription: text("line_description"),
-  privateNoteTemplate: text("private_note_template"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

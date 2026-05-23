@@ -498,14 +498,14 @@ export default function StripeIntegration({
                           </label>
                           <label className="flex flex-col gap-0.5 text-xs sm:col-span-2 lg:col-span-3">
                             <span className="text-ink-muted">
-                              Message template (CustomerMemo)
+                              Message fallback (CustomerMemo)
                             </span>
                             <input
                               name="quickbooksCustomerMemoTemplate"
                               defaultValue={
                                 selected.quickbooksCustomerMemoTemplate ?? ""
                               }
-                              placeholder="{{product_code}} — Stripe {{payment_intent_id}}"
+                              placeholder="Used only when no community member email"
                               className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
                             />
                           </label>

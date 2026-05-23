@@ -12,16 +12,16 @@ type NavItem = {
 };
 
 const STRIPE_TRANSACTIONS_PATH = "/integrations/stripe/transactions";
-const STRIPE_QB_PUSH_RULES_PATH =
+const STRIPE_QB_PUSH_PATH =
   "/integrations/stripe/transactions/quickbooks-push";
 
 function isStripeTransactionsNavActive(pathname: string): boolean {
   if (!pathname.startsWith(STRIPE_TRANSACTIONS_PATH)) return false;
-  return !pathname.startsWith(STRIPE_QB_PUSH_RULES_PATH);
+  return !pathname.startsWith(STRIPE_QB_PUSH_PATH);
 }
 
-function isStripeQuickBooksPushRulesNavActive(pathname: string): boolean {
-  return pathname === STRIPE_QB_PUSH_RULES_PATH;
+function isStripeQuickBooksPushNavActive(pathname: string): boolean {
+  return pathname === STRIPE_QB_PUSH_PATH;
 }
 
 const navItems: NavItem[] = [
@@ -30,6 +30,7 @@ const navItems: NavItem[] = [
   { to: "/products", label: "Products" },
   { to: "/reconciliations", label: "Reconciliations", end: true },
   { to: "/reconciliations/wc-stripe", label: "WC ↔ Stripe", child: true },
+  { to: "/reconciliations/stripe-qb", label: "Stripe ↔ QB", child: true },
   { to: "/integrations/woocommerce", label: "WooCommerce", end: true },
   { to: "/integrations/woocommerce/orders", label: "WC orders", child: true },
   { to: "/integrations/woocommerce/products", label: "WC products", child: true },
@@ -41,14 +42,15 @@ const navItems: NavItem[] = [
     isActive: isStripeTransactionsNavActive,
   },
   {
-    to: STRIPE_QB_PUSH_RULES_PATH,
-    label: "QB push rules",
+    to: STRIPE_QB_PUSH_PATH,
+    label: "QB push",
     child: true,
-    isActive: isStripeQuickBooksPushRulesNavActive,
+    isActive: isStripeQuickBooksPushNavActive,
   },
   { to: "/integrations/quickbooks", label: "QuickBooks", end: true },
   { to: "/integrations/quickbooks/accounts", label: "QB accounts", child: true },
   { to: "/integrations/quickbooks/classes", label: "QB classes", child: true },
+  { to: "/integrations/quickbooks/tax-codes", label: "QB VAT codes", child: true },
   { to: "/integrations/quickbooks/items", label: "QB products", child: true },
   {
     to: "/integrations/quickbooks/sales-receipts",

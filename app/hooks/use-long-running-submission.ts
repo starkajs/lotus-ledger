@@ -1,3 +1,4 @@
+import { getFormIntent, isFormSubmissionInFlight } from "~/lib/form-navigation";
 import { useNavigation } from "react-router";
 
 /** Form intents that may take many seconds — show full-screen busy overlay. */
@@ -6,15 +7,29 @@ const LONG_RUNNING_INTENTS = new Set([
   "classify",
   "reclassify",
   "refresh",
+  "push",
+  "push-qb-bulk",
+  "clear-qb-push",
 ]);
 
 const INTENT_MESSAGES: Record<string, string> = {
   classify: "Classifying transactions…",
   reclassify: "Re-classifying transaction…",
   refresh: "Refreshing from QuickBooks…",
+  push: "Pushing to QuickBooks…",
+  "clear-qb-push": "Clearing QuickBooks push flag…",
 };
 
 function messageForIntent(intent: string, pathname: string): string {
+  if (intent === "push" || intent === "push-qb-bulk") {
+    if (intent === "push-qb-bulk") {
+      return INTENT_MESSAGES["push-qb-bulk"] ?? "Pushing to QuickBooks…";
+    }
+    if (pathname.includes("/integrations/stripe/transactions/quickbooks-push")) {
+      return "Creating Sales Receipt in QuickBooks…";
+    }
+    return INTENT_MESSAGES.push ?? "Pushing to QuickBooks…";
+  }
   if (intent === "sync") {
     if (pathname.includes("/integrations/woocommerce/products")) {
       return "Syncing WooCommerce products…";
@@ -39,12 +54,12 @@ export function useLongRunningSubmission(): {
 } {
   const navigation = useNavigation();
 
-  if (navigation.state !== "submitting" || !navigation.formData) {
+  if (!isFormSubmissionInFlight(navigation)) {
     return { active: false, message: "" };
   }
 
-  const intent = navigation.formData.get("intent");
-  if (typeof intent !== "string" || !LONG_RUNNING_INTENTS.has(intent)) {
+  const intent = getFormIntent(navigation);
+  if (!intent || !LONG_RUNNING_INTENTS.has(intent)) {
     return { active: false, message: "" };
   }
 

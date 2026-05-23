@@ -11,6 +11,8 @@ export type ProductRecord = {
   code: string;
   name: string;
   quickbooksItemId: string | null;
+  /** QuickBooks TaxCode `Id` for Sales Receipt VAT. */
+  quickbooksTaxCodeId: string | null;
   /** VAT rate as a percentage (0–100). */
   vatRatePercent: number;
   isActive: boolean;
@@ -53,6 +55,7 @@ function productRowToRecord(
     code: row.code,
     name: row.name,
     quickbooksItemId: row.quickbooksItemId,
+    quickbooksTaxCodeId: row.quickbooksTaxCodeId,
     vatRatePercent: row.vatRatePercent ?? 0,
     isActive: row.isActive,
     sortOrder: row.sortOrder,
@@ -82,10 +85,17 @@ export async function getProductById(id: string): Promise<ProductRecord | null> 
   return row ? productRowToRecord(row) : null;
 }
 
+/** Parse QB tax code id from form; empty → null. */
+export function parseQuickbooksTaxCodeId(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
 export async function createProduct(input: {
   code: string;
   name: string;
   quickbooksItemId?: string | null;
+  quickbooksTaxCodeId?: string | null;
   vatRatePercent?: number;
   sortOrder?: number;
 }): Promise<ProductRecord> {
@@ -172,6 +182,7 @@ export async function updateProduct(
     code: string;
     name: string;
     quickbooksItemId: string | null;
+    quickbooksTaxCodeId: string | null;
     vatRatePercent: number;
     isActive: boolean;
     sortOrder: number;
@@ -188,6 +199,11 @@ export async function updateProduct(
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
       ...(input.quickbooksItemId !== undefined
         ? { quickbooksItemId: input.quickbooksItemId?.trim() || null }
+        : {}),
+      ...(input.quickbooksTaxCodeId !== undefined
+        ? {
+            quickbooksTaxCodeId: input.quickbooksTaxCodeId?.trim() || null,
+          }
         : {}),
       ...(input.vatRatePercent !== undefined
         ? { vatRatePercent: input.vatRatePercent }

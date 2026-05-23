@@ -1,6 +1,6 @@
 # Stripe → QuickBooks (Sales Receipt push)
 
-Lotus Ledger pushes eligible **Stripe balance transactions** into QuickBooks as **Sales Receipts** (`SalesReceipt` entity). Today the app **imports** sales receipts from QuickBooks but does **not** create them yet. This document is the mapping contract.
+Lotus Ledger pushes eligible **Stripe balance transactions** into QuickBooks as **Sales Receipts** (`SalesReceipt` entity).
 
 ## API signature
 
@@ -16,7 +16,7 @@ Lotus Ledger pushes eligible **Stripe balance transactions** into QuickBooks as 
 
 Implemented in `app/lib/quickbooks-api-write.server.ts` as `createQuickBooksSalesReceipt()`.
 
-## Field mapping (current plan)
+## Field mapping
 
 | QuickBooks field | Source |
 |------------------|--------|
@@ -24,16 +24,19 @@ Implemented in `app/lib/quickbooks-api-write.server.ts` as `createQuickBooksSale
 | `DepositToAccountRef` | **Stripe connection** → `quickbooks_deposit_account_id` |
 | `PaymentMethodRef` | **Stripe connection** → `quickbooks_payment_method_id` |
 | `PaymentRefNum` | Stripe connection template (default `{{payment_intent_id}}`) |
-| `CustomerMemo` | Stripe connection message template |
+| `CustomerMemo` | **Community member email** (Stripe connection message template only if no member email) |
+| `BillEmail` | Same as member email when linked |
+| `Line[].Description` | Stripe transaction description (charge, else balance) |
 | `TrackingNum` | `stripe_payment_intent_id` (`pi_…`) |
 | `TxnDate` | `stripe_created_at` (Europe/London calendar date) |
 | `Line[].SalesItemLineDetail.ItemRef` | Lotus **product** → `products.quickbooks_item_id` |
 | `Line[].Amount` / `UnitPrice` | Stripe **`amount` (gross)**; if Lotus product `vat_rate_percent` > 0, line net = gross ÷ (1 + VAT/100) so QB can add VAT on top |
-| `Line[].SalesItemLineDetail.TaxCodeRef` | Synced **QB item** `SalesTaxCodeRef` (push-rule override optional) |
+| `Line[].SalesItemLineDetail.TaxCodeRef` | Lotus **product** → `quickbooks_tax_code_id` (QB item tax code is fallback only) |
+| `GlobalTaxCalculation` | `TaxExcluded` (line amounts are net ex-VAT when VAT applies) |
 | `Line[].SalesItemLineDetail.ItemAccountRef` | Synced QB item **income account** |
 | `Line[].SalesItemLineDetail.ClassRef` | Synced QB item **class** |
 | `ClassRef` (header) | Same as line class when present on item |
-| `PrivateNote` | Push rule template (optional) |
+| `PrivateNote` | `{product_code} · {product_name} \| LL {lotus_transaction_id}` (product first for QB visibility) |
 
 ### Amount logic
 
@@ -49,23 +52,22 @@ Implemented in `app/lib/quickbooks-api-write.server.ts` as `createQuickBooksSale
 4. Stripe account has **QuickBooks customer**, **deposit to**, and **payment method** mapped.
 5. Reference / message templates configured on the Stripe account (reference defaults to payment intent id).
 6. Synced QB item exists (refresh **Products & services**).
-7. When `vat_rate_percent` > 0: QB item must have a tax code.
-8. A matching **push rule** (for notes / deposit fallback; matching still required today).
+7. Lotus product has **QuickBooks VAT code** set (sync at `/integrations/quickbooks/tax-codes`).
 
-## Rule layers
+## Configuration layers
 
 | Layer | UI | Purpose |
 |-------|-----|---------|
-| Stripe ↔ QB | Integrations → Stripe (per account) | QB customer + deposit account |
-| Product | `/products` | Code, QB item id, **VAT %** |
+| Stripe ↔ QB | Integrations → Stripe (per account) | QB customer, deposit, payment method, ref/memo templates |
+| Product | `/products` | Code, QB item id, **VAT %**, **QB VAT code** |
 | Product match | `/products/rules` | Which Lotus product |
-| QB push rules | `/integrations/stripe/transactions/quickbooks-push` | Match txn text; optional deposit fallback, note templates |
+| QB VAT codes | `/integrations/quickbooks/tax-codes` | Sync TaxCode list from QuickBooks |
 
-**First matching push rule wins** (lowest priority number first).
+## Dry run & test push
 
-## Dry run
+`planStripeQuickBooksPushForTransaction()` builds the Sales Receipt JSON from Stripe account mapping + Lotus product.
 
-`planStripeQuickBooksPushForTransaction()` returns proposed JSON, gross vs line amounts, VAT %, issues, and `ready`.
+`pushStripeBalanceTransactionToQuickBooks()` POSTs to QuickBooks, stores `quickbooks_sales_receipt_id`, and returns the raw API response (preview UI at `/integrations/stripe/transactions/quickbooks-push`).
 
 ## Reconciliation link
 
@@ -81,9 +83,15 @@ Secondary match: `quickbooks_sales_receipts.tracking_num` = `stripe_payment_inte
 
 Reverse lookup: `getStripeBalanceTransactionByQuickBooksSalesReceiptId()` / `getQuickBooksSalesReceiptByQuickbooksId()`.
 
+On successful push, if the receipt is not yet in `quickbooks_sales_receipts`, Lotus imports it from the API response (`upsertQuickBooksSalesReceiptFromApi()`).
+
+**Clear pushed flag:** `clearStripeBalanceTransactionQuickBooksPush()` sets `pushed_to_quickbooks = false`, clears `quickbooks_pushed_at` and `quickbooks_sales_receipt_id` (does not delete the synced QB receipt row). Available on the transaction detail page and the push preview page.
+
 ## Related code
 
 - `app/lib/stripe-quickbooks-push-plan.server.ts`
+- `app/lib/stripe-quickbooks-push-execute.server.ts`
+- `app/lib/quickbooks-api-write.server.ts` — `createQuickBooksSalesReceiptDetailed()`
 - `app/lib/stripe-quickbooks-push-amount.ts`
 - `app/lib/stripe-connections-quickbooks.server.ts`
 - `app/lib/quickbooks-master-data.server.ts` — `getQuickBooksItemPushDefaults()`
