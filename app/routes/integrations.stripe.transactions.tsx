@@ -324,12 +324,20 @@ export default function StripeTransactionsPage({
       description="Balance transactions synced from each connected Stripe account."
       actions={
         connections.length > 0 ? (
-          <Link
-            to={summaryHref}
-            className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 text-sm hover:bg-surface"
-          >
-            Sales by product
-          </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to="/integrations/stripe/transactions/quickbooks-push"
+                className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 text-sm hover:bg-surface"
+              >
+                QB push rules
+              </Link>
+              <Link
+                to={summaryHref}
+                className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 text-sm hover:bg-surface"
+              >
+                Sales by product
+              </Link>
+            </div>
         ) : undefined
       }
     >

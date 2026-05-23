@@ -19,6 +19,11 @@ export type StripeConnectionPublic = {
   keyLast4: string;
   livemode: boolean;
   defaultCurrency: string | null;
+  quickbooksCustomerId: string | null;
+  quickbooksDepositAccountId: string | null;
+  quickbooksPaymentMethodId: string | null;
+  quickbooksPaymentRefTemplate: string | null;
+  quickbooksCustomerMemoTemplate: string | null;
   createdAt: string;
 };
 
@@ -30,6 +35,11 @@ function mapPublic(row: typeof stripeConnections.$inferSelect): StripeConnection
     keyLast4: row.keyLast4,
     livemode: row.livemode,
     defaultCurrency: row.defaultCurrency,
+    quickbooksCustomerId: row.quickbooksCustomerId,
+    quickbooksDepositAccountId: row.quickbooksDepositAccountId,
+    quickbooksPaymentMethodId: row.quickbooksPaymentMethodId,
+    quickbooksPaymentRefTemplate: row.quickbooksPaymentRefTemplate,
+    quickbooksCustomerMemoTemplate: row.quickbooksCustomerMemoTemplate,
     createdAt: row.createdAt.toISOString(),
   };
 }

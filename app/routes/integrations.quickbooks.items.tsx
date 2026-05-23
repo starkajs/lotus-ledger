@@ -84,6 +84,8 @@ export default function QuickBooksItemsPage({
                 <th className="px-4 py-3 font-medium">Type</th>
                 <th className="px-4 py-3 font-medium">SKU</th>
                 <th className="px-4 py-3 font-medium">Unit price</th>
+                <th className="px-4 py-3 font-medium">VAT code</th>
+                <th className="px-4 py-3 font-medium">Class</th>
                 <th className="px-4 py-3 font-medium">Income account</th>
                 <th className="px-4 py-3 font-medium">QB ID</th>
                 <th className="px-4 py-3 font-medium">Status</th>
@@ -104,6 +106,12 @@ export default function QuickBooksItemsPage({
                   <td className="px-4 py-3 font-mono text-xs">{row.sku ?? "—"}</td>
                   <td className="px-4 py-3 font-mono text-ink-muted">
                     {row.unitPrice ?? "—"}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-ink-muted">
+                    {row.salesTaxCodeRef ?? "—"}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-ink-muted">
+                    {row.quickbooksClassRef ?? "—"}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-ink-faint">
                     {row.incomeAccountRef ?? "—"}

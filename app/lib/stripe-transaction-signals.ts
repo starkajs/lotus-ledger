@@ -25,6 +25,8 @@ export type ClassificationField =
   | "donorbox_metadata"
   | "metadata_all"
   | "sku"
+  | "stripe_type"
+  | "reporting_category"
   | "any";
 
 export type ClassificationText = {

@@ -8,6 +8,8 @@ export const INTEGRATION_JOB_TYPES = [
   "quickbooks_accounts_sync",
   "quickbooks_classes_sync",
   "quickbooks_items_sync",
+  "quickbooks_tax_codes_sync",
+  "quickbooks_payment_methods_sync",
   "quickbooks_sales_receipts_sync",
 ] as const;
 
@@ -25,6 +27,8 @@ export const INTEGRATION_JOB_TYPE_LABELS: Record<IntegrationJobType, string> = {
   quickbooks_accounts_sync: "QuickBooks accounts sync",
   quickbooks_classes_sync: "QuickBooks classes sync",
   quickbooks_items_sync: "QuickBooks items sync",
+  quickbooks_tax_codes_sync: "QuickBooks tax codes sync",
+  quickbooks_payment_methods_sync: "QuickBooks payment methods sync",
   quickbooks_sales_receipts_sync: "QuickBooks sales receipts sync",
 };
 

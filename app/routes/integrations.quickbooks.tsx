@@ -323,6 +323,14 @@ APP_URL=http://localhost:5174`}
                       Sales receipts
                     </Link>
                   </li>
+                  <li>
+                    <Link
+                      to="/integrations/stripe/transactions/quickbooks-push"
+                      className="rounded-jamyang-pill border border-sand-dark/60 px-4 py-2 hover:bg-surface"
+                    >
+                      Stripe → QB push rules
+                    </Link>
+                  </li>
                 </ul>
               </section>
             )}

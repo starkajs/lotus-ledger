@@ -24,6 +24,10 @@ export default [
       "routes/integrations.stripe.transactions.tsx",
     ),
     route(
+      "integrations/stripe/transactions/quickbooks-push",
+      "routes/integrations.stripe.transactions.quickbooks-push.tsx",
+    ),
+    route(
       "integrations/stripe/transactions/summary",
       "routes/integrations.stripe.transactions.summary.tsx",
     ),

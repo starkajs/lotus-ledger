@@ -3,12 +3,20 @@ import type { Route } from "./+types/integrations.stripe";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
 import {
+  listQuickBooksAccounts,
+  listQuickBooksPaymentMethods,
+  syncQuickBooksPaymentMethods,
+} from "~/lib/quickbooks-master-data.server";
+import { DEFAULT_STRIPE_QB_PAYMENT_REF_TEMPLATE } from "~/lib/stripe-connections-quickbooks.server";
+import { getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
+import {
   createStripeConnection,
   deleteStripeConnection,
   listStripeConnections,
   verifyStoredStripeConnection,
   type StripeConnectionPublic,
 } from "~/lib/stripe-connections.server";
+import { updateStripeConnectionQuickBooksMapping } from "~/lib/stripe-connections-quickbooks.server";
 import {
   fetchStripeTransactions,
   type StripeTransactionSummary,
@@ -23,7 +31,13 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const connections = await listStripeConnections();
+  await requireUser(request);
+  const [connections, qbAccounts, qbPaymentMethods, qbTokens] = await Promise.all([
+    listStripeConnections(),
+    listQuickBooksAccounts(),
+    listQuickBooksPaymentMethods(),
+    getQuickBooksTokens(),
+  ]);
 
   const url = new URL(request.url);
   const selectedId =
@@ -71,6 +85,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     verifyError,
     currency,
     availableBalance,
+    qbConnected: Boolean(qbTokens),
+    qbDepositAccounts: qbAccounts.accounts.filter((a) => a.active),
+    qbPaymentMethods: qbPaymentMethods.paymentMethods.filter((p) => p.active),
+    defaultPaymentRefTemplate: DEFAULT_STRIPE_QB_PAYMENT_REF_TEMPLATE,
   };
 }
 
@@ -112,6 +130,46 @@ export async function action({ request }: Route.ActionArgs) {
     const id = String(form.get("connectionId") ?? "");
     if (id) await deleteStripeConnection(id);
     throw redirect("/integrations/stripe");
+  }
+
+  if (intent === "save-qb-mapping") {
+    const connectionId = String(form.get("connectionId") ?? "").trim();
+    if (!connectionId) {
+      return { error: "Connection id required" };
+    }
+    await updateStripeConnectionQuickBooksMapping(connectionId, {
+      quickbooksCustomerId:
+        String(form.get("quickbooksCustomerId") ?? "").trim() || null,
+      quickbooksDepositAccountId:
+        String(form.get("quickbooksDepositAccountId") ?? "").trim() || null,
+      quickbooksPaymentMethodId:
+        String(form.get("quickbooksPaymentMethodId") ?? "").trim() || null,
+      quickbooksPaymentRefTemplate:
+        String(form.get("quickbooksPaymentRefTemplate") ?? "").trim() || null,
+      quickbooksCustomerMemoTemplate:
+        String(form.get("quickbooksCustomerMemoTemplate") ?? "").trim() || null,
+    });
+    throw redirect(`/integrations/stripe?account=${connectionId}`);
+  }
+
+  if (intent === "sync-payment-methods") {
+    try {
+      await syncQuickBooksPaymentMethods({
+        triggeredBy: "app",
+        userId: user.id,
+      });
+    } catch (err) {
+      return {
+        error:
+          err instanceof Error ? err.message : "Failed to sync payment methods",
+      };
+    }
+    const connectionId = String(form.get("connectionId") ?? "").trim();
+    throw redirect(
+      connectionId
+        ? `/integrations/stripe?account=${connectionId}`
+        : "/integrations/stripe",
+    );
   }
 
   return { error: "Unknown action" };
@@ -172,6 +230,10 @@ export default function StripeIntegration({
     verifyError,
     currency,
     availableBalance,
+    qbConnected,
+    qbDepositAccounts,
+    qbPaymentMethods,
+    defaultPaymentRefTemplate,
   } = loaderData;
 
   const selected = connections.find((c) => c.id === selectedId);
@@ -325,6 +387,142 @@ export default function StripeIntegration({
 
                 {verifyOk && (
                   <>
+                    <div className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-4 sm:p-6">
+                      <h3 className="text-sm font-medium text-dark">
+                        QuickBooks mapping
+                      </h3>
+                      <p className="mt-1 text-xs text-ink-muted">
+                        Sales receipts use this Stripe account for customer,
+                        deposit to, payment method, reference no, and message.
+                        Item, class, income account, and tax code come from the
+                        Lotus product and synced QB item.
+                      </p>
+                      {!qbConnected ? (
+                        <p className="mt-3 text-sm text-maroon">
+                          Connect QuickBooks first.{" "}
+                          <Link
+                            to="/integrations/quickbooks"
+                            className="text-teal underline"
+                          >
+                            QuickBooks settings
+                          </Link>
+                        </p>
+                      ) : (
+                        <>
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                          <Form method="post">
+                            <input
+                              type="hidden"
+                              name="intent"
+                              value="sync-payment-methods"
+                            />
+                            <input
+                              type="hidden"
+                              name="connectionId"
+                              value={selected.id}
+                            />
+                            <SubmitButton
+                              intent="sync-payment-methods"
+                              variant="pill"
+                              loadingLabel="Syncing…"
+                            >
+                              Sync payment methods
+                            </SubmitButton>
+                          </Form>
+                          {qbPaymentMethods.length === 0 && (
+                            <span className="text-xs text-ink-muted">
+                              No payment methods yet — sync from QuickBooks
+                            </span>
+                          )}
+                        </div>
+                        <Form
+                          key={selected.id}
+                          method="post"
+                          className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+                        >
+                          <input type="hidden" name="intent" value="save-qb-mapping" />
+                          <input type="hidden" name="connectionId" value={selected.id} />
+                          <label className="flex flex-col gap-0.5 text-xs">
+                            <span className="text-ink-muted">QB customer id</span>
+                            <input
+                              name="quickbooksCustomerId"
+                              defaultValue={selected.quickbooksCustomerId ?? ""}
+                              placeholder="QuickBooks Customer Id"
+                              className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm font-mono"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-0.5 text-xs">
+                            <span className="text-ink-muted">Deposit to</span>
+                            <select
+                              name="quickbooksDepositAccountId"
+                              defaultValue={selected.quickbooksDepositAccountId ?? ""}
+                              className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
+                            >
+                              <option value="">Select account…</option>
+                              {qbDepositAccounts.map((a) => (
+                                <option key={a.quickbooksId} value={a.quickbooksId}>
+                                  {a.fullyQualifiedName ?? a.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex flex-col gap-0.5 text-xs">
+                            <span className="text-ink-muted">Payment method</span>
+                            <select
+                              name="quickbooksPaymentMethodId"
+                              defaultValue={selected.quickbooksPaymentMethodId ?? ""}
+                              className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
+                            >
+                              <option value="">Select method…</option>
+                              {qbPaymentMethods.map((p) => (
+                                <option key={p.quickbooksId} value={p.quickbooksId}>
+                                  {p.name}
+                                  {p.type ? ` (${p.type})` : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex flex-col gap-0.5 text-xs sm:col-span-2">
+                            <span className="text-ink-muted">
+                              Reference no template (PaymentRefNum)
+                            </span>
+                            <input
+                              name="quickbooksPaymentRefTemplate"
+                              defaultValue={
+                                selected.quickbooksPaymentRefTemplate ??
+                                defaultPaymentRefTemplate
+                              }
+                              placeholder={defaultPaymentRefTemplate}
+                              className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm font-mono"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-0.5 text-xs sm:col-span-2 lg:col-span-3">
+                            <span className="text-ink-muted">
+                              Message template (CustomerMemo)
+                            </span>
+                            <input
+                              name="quickbooksCustomerMemoTemplate"
+                              defaultValue={
+                                selected.quickbooksCustomerMemoTemplate ?? ""
+                              }
+                              placeholder="{{product_code}} — Stripe {{payment_intent_id}}"
+                              className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
+                            />
+                          </label>
+                          <div className="sm:col-span-2 lg:col-span-3">
+                            <SubmitButton
+                              intent="save-qb-mapping"
+                              variant="pill"
+                              loadingLabel="Saving…"
+                            >
+                              Save mapping
+                            </SubmitButton>
+                          </div>
+                        </Form>
+                        </>
+                      )}
+                    </div>
+
                     <div className="flex flex-wrap items-center justify-between gap-4">
                       <h3 className="text-lg">Recent balance transactions</h3>
                       <div className="flex flex-wrap gap-3 text-sm">

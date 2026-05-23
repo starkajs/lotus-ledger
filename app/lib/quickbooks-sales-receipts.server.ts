@@ -514,3 +514,24 @@ export async function getQuickBooksSalesReceiptById(
 
   return row ? rowToRecord(row) : null;
 }
+
+/** Lookup synced receipt by QuickBooks entity `Id` (optionally scoped to realm). */
+export async function getQuickBooksSalesReceiptByQuickbooksId(
+  quickbooksId: string,
+  realmId?: string,
+): Promise<QuickBooksSalesReceiptRecord | null> {
+  const db = getDb();
+  const where = realmId
+    ? and(
+        eq(quickbooksSalesReceipts.realmId, realmId),
+        eq(quickbooksSalesReceipts.quickbooksId, quickbooksId),
+      )
+    : eq(quickbooksSalesReceipts.quickbooksId, quickbooksId);
+  const [row] = await db
+    .select()
+    .from(quickbooksSalesReceipts)
+    .where(where)
+    .limit(1);
+
+  return row ? rowToRecord(row) : null;
+}

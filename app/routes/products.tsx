@@ -5,8 +5,11 @@ import { ActionToast } from "~/components/action-toast";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
 import {
+  countStripeTransactionsPerProduct,
   createProduct,
+  deleteProduct,
   listProducts,
+  parseVatRatePercent,
   updateProduct,
 } from "~/lib/products.server";
 import { requireUser } from "~/lib/session.server";
@@ -20,8 +23,11 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
-  const products = await listProducts();
-  return { products };
+  const [products, stripeTransactionCountByProductId] = await Promise.all([
+    listProducts(),
+    countStripeTransactionsPerProduct(),
+  ]);
+  return { products, stripeTransactionCountByProductId };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -36,11 +42,16 @@ export async function action({ request }: Route.ActionArgs) {
     if (!code || !name) {
       return { scope: "create" as const, error: "Code and name are required" };
     }
+    const vatParsed = parseVatRatePercent(String(form.get("vatRatePercent") ?? ""));
+    if (!vatParsed.ok) {
+      return { scope: "create" as const, error: vatParsed.error };
+    }
     try {
       await createProduct({
         code,
         name,
         quickbooksItemId: quickbooksItemId || null,
+        vatRatePercent: vatParsed.value,
       });
       return { scope: "create" as const, success: true as const };
     } catch (err) {
@@ -59,13 +70,34 @@ export async function action({ request }: Route.ActionArgs) {
     if (!id || !name) {
       return { scope: "update" as const, error: "Product id and name are required" };
     }
+    const vatParsed = parseVatRatePercent(String(form.get("vatRatePercent") ?? ""));
+    if (!vatParsed.ok) {
+      return { scope: "update" as const, error: vatParsed.error };
+    }
     await updateProduct(id, {
       name,
       quickbooksItemId: quickbooksItemId || null,
+      vatRatePercent: vatParsed.value,
       isActive,
     });
     return {
       scope: "update" as const,
+      success: true as const,
+      code: String(form.get("code") ?? ""),
+    };
+  }
+
+  if (intent === "delete") {
+    const id = String(form.get("id") ?? "").trim();
+    if (!id) {
+      return { scope: "delete" as const, error: "Product id is required" };
+    }
+    const result = await deleteProduct(id);
+    if (!result.ok) {
+      return { scope: "delete" as const, error: result.reason };
+    }
+    return {
+      scope: "delete" as const,
       success: true as const,
       code: String(form.get("code") ?? ""),
     };
@@ -78,7 +110,7 @@ export default function ProductsPage({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { products } = loaderData;
+  const { products, stripeTransactionCountByProductId } = loaderData;
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -90,13 +122,18 @@ export default function ProductsPage({
     if (actionData.scope === "update" && actionData.success) {
       const label = actionData.code?.trim();
       setToast(label ? `${label} saved.` : "Product saved.");
+      return;
+    }
+    if (actionData.scope === "delete" && actionData.success) {
+      const label = actionData.code?.trim();
+      setToast(label ? `${label} deleted.` : "Product deleted.");
     }
   }, [actionData]);
 
   return (
     <AppPage
       title="Products"
-      description="Lotus product catalog. Each product maps to one QuickBooks item for pushes."
+      description="Lotus product catalog. Each product maps to one QuickBooks item and a VAT rate (default 0%)."
       actions={
         <Link
           to="/products/rules"
@@ -138,11 +175,27 @@ export default function ProductsPage({
               className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm font-mono"
             />
           </label>
+          <label className="flex flex-col gap-0.5 text-xs w-[5.5rem]">
+            <span className="text-ink-muted">VAT %</span>
+            <input
+              name="vatRatePercent"
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              defaultValue={0}
+              className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm font-mono"
+            />
+          </label>
           <SubmitButton intent="create" variant="pill" loadingLabel="Adding…">
             Add
           </SubmitButton>
         </Form>
         {actionData?.scope === "create" && actionData.error && (
+          <p className="mt-2 text-sm text-maroon">{actionData.error}</p>
+        )}
+        {(actionData?.scope === "update" || actionData?.scope === "delete") &&
+          actionData.error && (
           <p className="mt-2 text-sm text-maroon">{actionData.error}</p>
         )}
       </section>
@@ -167,15 +220,17 @@ export default function ProductsPage({
               <th className="px-3 py-2 font-medium w-[5rem]">Code</th>
               <th className="px-3 py-2 font-medium">Name</th>
               <th className="px-3 py-2 font-medium w-[10rem]">QuickBooks item</th>
+              <th className="px-3 py-2 font-medium w-[5rem]">VAT %</th>
               <th className="px-3 py-2 font-medium w-[5rem]">Active</th>
               <th className="px-3 py-2 font-medium w-[5rem] text-right">Save</th>
+              <th className="px-3 py-2 font-medium w-[5rem] text-right">Delete</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-sand-dark/30 bg-surface-overlay">
             {products.length === 0 ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={7}
                   className="px-3 py-6 text-center text-sm text-ink-muted"
                 >
                   No products yet. Add one above.
@@ -184,8 +239,11 @@ export default function ProductsPage({
             ) : (
               products.map((p) => {
                 const formId = `product-update-${p.id}`;
+                const stripeTxnCount =
+                  stripeTransactionCountByProductId[p.id] ?? 0;
+                const canDelete = stripeTxnCount === 0;
                 return (
-                  <tr key={p.id} className="align-middle">
+                  <tr key={`${p.id}-${p.updatedAt}`} className="align-middle">
                     <td className="px-3 py-2 font-mono text-xs text-dark">
                       {p.code}
                     </td>
@@ -206,6 +264,19 @@ export default function ProductsPage({
                         placeholder="QBO item id"
                         aria-label={`QuickBooks item for ${p.code}`}
                         className="w-full min-w-[8rem] rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1 text-sm font-mono"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        form={formId}
+                        name="vatRatePercent"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.01}
+                        defaultValue={p.vatRatePercent}
+                        aria-label={`VAT rate for ${p.code}`}
+                        className="w-full max-w-[5rem] rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1 text-sm font-mono text-right"
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -230,6 +301,37 @@ export default function ProductsPage({
                       >
                         Save
                       </SubmitButton>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <Form
+                        method="post"
+                        className="inline"
+                        onSubmit={(e) => {
+                          if (
+                            !confirm(
+                              `Delete product ${p.code} (${p.name})? Match rules for this product will also be removed.`,
+                            )
+                          ) {
+                            e.preventDefault();
+                          }
+                        }}
+                      >
+                        <input type="hidden" name="intent" value="delete" />
+                        <input type="hidden" name="id" value={p.id} />
+                        <input type="hidden" name="code" value={p.code} />
+                        <button
+                          type="submit"
+                          disabled={!canDelete}
+                          title={
+                            canDelete
+                              ? "Delete product"
+                              : `Cannot delete: ${stripeTxnCount} Stripe transaction${stripeTxnCount === 1 ? "" : "s"} use this product`
+                          }
+                          className="text-sm text-maroon hover:underline disabled:cursor-not-allowed disabled:text-ink-faint disabled:no-underline"
+                        >
+                          Delete
+                        </button>
+                      </Form>
                     </td>
                   </tr>
                 );

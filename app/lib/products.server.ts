@@ -1,17 +1,36 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, count, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "~/db";
-import { productMatchRules, products } from "~/db/schema";
+import {
+  productMatchRules,
+  products,
+  stripeBalanceTransactions,
+} from "~/db/schema";
 
 export type ProductRecord = {
   id: string;
   code: string;
   name: string;
   quickbooksItemId: string | null;
+  /** VAT rate as a percentage (0–100). */
+  vatRatePercent: number;
   isActive: boolean;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
 };
+
+/** Parse VAT % from form input; empty → 0. */
+export function parseVatRatePercent(
+  value: string,
+): { ok: true; value: number } | { ok: false; error: string } {
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true, value: 0 };
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
+    return { ok: false, error: "VAT rate must be between 0 and 100" };
+  }
+  return { ok: true, value: n };
+}
 
 export type ProductMatchRuleRow = {
   id: string;
@@ -34,6 +53,7 @@ function productRowToRecord(
     code: row.code,
     name: row.name,
     quickbooksItemId: row.quickbooksItemId,
+    vatRatePercent: row.vatRatePercent ?? 0,
     isActive: row.isActive,
     sortOrder: row.sortOrder,
     createdAt: row.createdAt.toISOString(),
@@ -66,6 +86,7 @@ export async function createProduct(input: {
   code: string;
   name: string;
   quickbooksItemId?: string | null;
+  vatRatePercent?: number;
   sortOrder?: number;
 }): Promise<ProductRecord> {
   const db = getDb();
@@ -76,11 +97,73 @@ export async function createProduct(input: {
       code: input.code.trim().toUpperCase(),
       name: input.name.trim(),
       quickbooksItemId: input.quickbooksItemId?.trim() || null,
+      vatRatePercent: input.vatRatePercent ?? 0,
       sortOrder: input.sortOrder ?? 0,
       updatedAt: now,
     })
     .returning();
   return productRowToRecord(row!);
+}
+
+/** Stripe balance transactions classified to this Lotus product. */
+export async function countStripeTransactionsForProduct(
+  productId: string,
+): Promise<number> {
+  const db = getDb();
+  const [{ value }] = await db
+    .select({ value: count() })
+    .from(stripeBalanceTransactions)
+    .where(eq(stripeBalanceTransactions.productId, productId));
+  return value;
+}
+
+/** Counts per product id (only products with at least one classified transaction). */
+export async function countStripeTransactionsPerProduct(): Promise<
+  Record<string, number>
+> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      productId: stripeBalanceTransactions.productId,
+      value: count(),
+    })
+    .from(stripeBalanceTransactions)
+    .where(isNotNull(stripeBalanceTransactions.productId))
+    .groupBy(stripeBalanceTransactions.productId);
+
+  const out: Record<string, number> = {};
+  for (const row of rows) {
+    if (row.productId) out[row.productId] = row.value;
+  }
+  return out;
+}
+
+export type DeleteProductResult =
+  | { ok: true }
+  | { ok: false; reason: string; transactionCount: number };
+
+/** Delete a catalog product when no Stripe transactions reference it. */
+export async function deleteProduct(id: string): Promise<DeleteProductResult> {
+  const transactionCount = await countStripeTransactionsForProduct(id);
+  if (transactionCount > 0) {
+    return {
+      ok: false,
+      reason: `Cannot delete: ${transactionCount} Stripe transaction${transactionCount === 1 ? "" : "s"} use this product.`,
+      transactionCount,
+    };
+  }
+
+  const db = getDb();
+  const deleted = await db
+    .delete(products)
+    .where(eq(products.id, id))
+    .returning({ id: products.id });
+
+  if (deleted.length === 0) {
+    return { ok: false, reason: "Product not found", transactionCount: 0 };
+  }
+
+  return { ok: true };
 }
 
 export async function updateProduct(
@@ -89,6 +172,7 @@ export async function updateProduct(
     code: string;
     name: string;
     quickbooksItemId: string | null;
+    vatRatePercent: number;
     isActive: boolean;
     sortOrder: number;
   }>,
@@ -104,6 +188,9 @@ export async function updateProduct(
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
       ...(input.quickbooksItemId !== undefined
         ? { quickbooksItemId: input.quickbooksItemId?.trim() || null }
+        : {}),
+      ...(input.vatRatePercent !== undefined
+        ? { vatRatePercent: input.vatRatePercent }
         : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
       ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),

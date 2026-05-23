@@ -5,6 +5,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  real,
   text,
   timestamp,
   unique,
@@ -70,6 +71,16 @@ export const stripeConnections = pgTable("stripe_connections", {
   keyLast4: text("key_last4").notNull(),
   livemode: boolean().notNull().default(false),
   defaultCurrency: text("default_currency"),
+  /** QuickBooks Customer Id for Sales Receipts from this Stripe account. */
+  quickbooksCustomerId: text("quickbooks_customer_id"),
+  /** QuickBooks Account Id for DepositToAccountRef (bank / undeposited funds). */
+  quickbooksDepositAccountId: text("quickbooks_deposit_account_id"),
+  /** QuickBooks PaymentMethod Id (e.g. card, bank transfer). */
+  quickbooksPaymentMethodId: text("quickbooks_payment_method_id"),
+  /** Template for PaymentRefNum (reference no). Default: {{payment_intent_id}} */
+  quickbooksPaymentRefTemplate: text("quickbooks_payment_ref_template"),
+  /** Template for CustomerMemo (message on receipt). */
+  quickbooksCustomerMemoTemplate: text("quickbooks_customer_memo_template"),
   addedByUserId: uuid("added_by_user_id")
     .notNull()
     .references(() => users.id, { onDelete: "restrict" }),
@@ -117,6 +128,8 @@ export const products = pgTable("products", {
   code: text().notNull().unique(),
   name: text().notNull(),
   quickbooksItemId: text("quickbooks_item_id"),
+  /** UK VAT rate as a percentage (e.g. 20 = 20%, 0 = zero-rated). */
+  vatRatePercent: real("vat_rate_percent").notNull().default(0),
   isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -135,6 +148,33 @@ export const productMatchRules = pgTable("product_match_rules", {
   pattern: text().notNull(),
   caseInsensitive: boolean("case_insensitive").notNull().default(true),
   isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Match Stripe balance txns to QuickBooks Sales Receipt field assignments (first match wins).
+ * Product/item comes from product_match_rules + products.quickbooks_item_id.
+ */
+export const stripeQuickbooksPushRules = pgTable("stripe_quickbooks_push_rules", {
+  id: uuid().primaryKey().defaultRandom(),
+  priority: integer().notNull().default(100),
+  field: text().notNull(),
+  matchType: text("match_type").notNull(),
+  pattern: text().notNull(),
+  caseInsensitive: boolean("case_insensitive").notNull().default(true),
+  isActive: boolean("is_active").notNull().default(true),
+  /** Fallback deposit account when not set on the Stripe connection. */
+  depositToAccountId: text("deposit_to_account_id"),
+  quickbooksClassId: text("quickbooks_class_id"),
+  paymentMethodId: text("payment_method_id"),
+  amountSource: text("amount_source").notNull().default("net"),
+  customerMode: text("customer_mode").notNull().default("omit"),
+  customerQuickbooksId: text("customer_quickbooks_id"),
+  /** QB TaxCode Id for `SalesItemLineDetail.TaxCodeRef` (VAT). */
+  taxCodeId: text("tax_code_id"),
+  lineDescription: text("line_description"),
+  privateNoteTemplate: text("private_note_template"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -189,6 +229,8 @@ export const stripeBalanceTransactions = pgTable(
     /** `true` pushed, `false` not pushed, `null` N/A (before QuickBooks cutoff). */
     pushedToQuickbooks: boolean("pushed_to_quickbooks").default(false),
     quickbooksPushedAt: timestamp("quickbooks_pushed_at", { withTimezone: true }),
+    /** QuickBooks Sales Receipt entity Id (`SalesReceipt.Id`) after LL push — reconcile link. */
+    quickbooksSalesReceiptId: text("quickbooks_sales_receipt_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -199,6 +241,9 @@ export const stripeBalanceTransactions = pgTable(
     ),
     index("stripe_balance_transactions_order_key_idx").on(table.orderKey),
     index("stripe_balance_transactions_wc_order_id_idx").on(table.wcOrderId),
+    index("stripe_balance_transactions_qb_sales_receipt_id_idx").on(
+      table.quickbooksSalesReceiptId,
+    ),
   ],
 );
 
@@ -260,6 +305,50 @@ export const quickbooksClasses = pgTable(
   ],
 );
 
+/** QuickBooks payment methods synced for Sales Receipt mapping. */
+export const quickbooksPaymentMethods = pgTable(
+  "quickbooks_payment_methods",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    realmId: text("realm_id").notNull(),
+    quickbooksId: text("quickbooks_id").notNull(),
+    name: text().notNull(),
+    type: text(),
+    active: boolean().notNull().default(true),
+    quickbooksRaw: jsonb("quickbooks_raw").$type<Record<string, unknown>>(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("qb_payment_methods_realm_qb_id_unique").on(
+      table.realmId,
+      table.quickbooksId,
+    ),
+  ],
+);
+
+/** QuickBooks tax / VAT codes synced for Sales Receipt line mapping. */
+export const quickbooksTaxCodes = pgTable(
+  "quickbooks_tax_codes",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    realmId: text("realm_id").notNull(),
+    quickbooksId: text("quickbooks_id").notNull(),
+    name: text().notNull(),
+    description: text(),
+    active: boolean().notNull().default(true),
+    taxable: boolean(),
+    quickbooksRaw: jsonb("quickbooks_raw").$type<Record<string, unknown>>(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("qb_tax_codes_realm_qb_id_unique").on(table.realmId, table.quickbooksId),
+  ],
+);
+
 /** QuickBooks Items (products & services) synced for Lotus product mapping. */
 export const quickbooksItems = pgTable(
   "quickbooks_items",
@@ -273,6 +362,10 @@ export const quickbooksItems = pgTable(
     description: text(),
     unitPrice: text("unit_price"),
     incomeAccountRef: text("income_account_ref"),
+    /** QB Class Id from the item (`ClassRef`). */
+    quickbooksClassRef: text("quickbooks_class_ref"),
+    /** Default sales tax / VAT code on the QB item (`SalesTaxCodeRef`). */
+    salesTaxCodeRef: text("sales_tax_code_ref"),
     active: boolean().notNull().default(true),
     quickbooksRaw: jsonb("quickbooks_raw").$type<Record<string, unknown>>(),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull(),

@@ -13,7 +13,11 @@ import {
 } from "~/lib/product-classification.server";
 import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
 import { getProductMatchRuleById, listProducts } from "~/lib/products.server";
+import { getQuickBooksSalesReceiptByQuickbooksId } from "~/lib/quickbooks-sales-receipts.server";
+import { getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
 import { getStripeBalanceTransactionById } from "~/lib/stripe-balance-transactions.server";
+import { planStripeQuickBooksPushForTransaction } from "~/lib/stripe-quickbooks-push-plan.server";
+import { listActiveStripeQuickBooksPushRules } from "~/lib/stripe-quickbooks-push-rules.server";
 import { requireUser } from "~/lib/session.server";
 import {
   findLinkedWooCommerceOrderForStripeTransaction,
@@ -89,6 +93,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const products = await listProducts({ activeOnly: true });
   const pushCheck = canPushTransactionToQuickbooks(tx);
+  const pushPlan = await planStripeQuickBooksPushForTransaction({
+    transaction: tx,
+    pushRules: await listActiveStripeQuickBooksPushRules(),
+  });
   const productSignals = extractStripeTransactionProductSignals({
     stripeRaw: tx.stripeRaw,
     description: tx.description,
@@ -135,12 +143,34 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const stripeUnmatched = isStripeProductUnmatched(tx);
 
+  let linkedQuickBooksSalesReceipt: {
+    lotusId: string;
+    docNumber: string | null;
+    txnDate: string | null;
+  } | null = null;
+  if (tx.quickbooksSalesReceiptId) {
+    const tokens = await getQuickBooksTokens();
+    const receipt = await getQuickBooksSalesReceiptByQuickbooksId(
+      tx.quickbooksSalesReceiptId,
+      tokens?.realmId,
+    );
+    if (receipt) {
+      linkedQuickBooksSalesReceipt = {
+        lotusId: receipt.id,
+        docNumber: receipt.docNumber,
+        txnDate: receipt.txnDate,
+      };
+    }
+  }
+
   return {
     tx,
+    linkedQuickBooksSalesReceipt,
     products,
     productSignals,
     matchedRule,
     pushCheck,
+    pushPlan,
     returnTo,
     stripeDashboardUrl: `${stripeDashboardHost}/balance/all-activity`,
     linkedWcOrder,
@@ -223,12 +253,14 @@ export default function StripeTransactionDetailPage({
     productSignals,
     matchedRule,
     pushCheck,
+    pushPlan,
     returnTo,
     stripeDashboardUrl,
     linkedWcOrder,
     linkedWcOrderFull,
     wcLotusProductForCopy,
     stripeUnmatched,
+    linkedQuickBooksSalesReceipt,
   } = loaderData;
   const location = useLocation();
   const postAction = location.pathname + location.search;
@@ -402,11 +434,24 @@ export default function StripeTransactionDetailPage({
         </DetailRow>
         <p className="mt-3 text-xs text-ink-muted">
           QuickBooks push:{" "}
-          {pushCheck.ok ? (
-            <span className="text-jade">Ready</span>
+          {pushPlan.ready ? (
+            <span className="text-jade">Ready (product + push rule)</span>
+          ) : pushCheck.ok && !pushPlan.pushRuleId ? (
+            <span className="text-maroon">No push rule matched</span>
           ) : (
-            <span className="text-maroon">{pushCheck.reason}</span>
+            <span className="text-maroon">
+              {[pushCheck.ok ? null : pushCheck.reason, ...pushPlan.issues]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
           )}
+          {" · "}
+          <Link
+            to={`/integrations/stripe/transactions/quickbooks-push?preview=${tx.id}`}
+            className="text-teal hover:underline"
+          >
+            Preview Sales Receipt JSON
+          </Link>
         </p>
       </div>
 
@@ -550,6 +595,32 @@ export default function StripeTransactionDetailPage({
               "Not pushed"
             )}
           </DetailRow>
+          {tx.quickbooksSalesReceiptId ? (
+            <DetailRow label="QB sales receipt">
+              <span className="font-mono text-xs">
+                {tx.quickbooksSalesReceiptId}
+              </span>
+              {linkedQuickBooksSalesReceipt ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <Link
+                    to={`/integrations/quickbooks/sales-receipts/${linkedQuickBooksSalesReceipt.lotusId}`}
+                    className="text-teal-dark underline"
+                  >
+                    {linkedQuickBooksSalesReceipt.docNumber
+                      ? `Receipt ${linkedQuickBooksSalesReceipt.docNumber}`
+                      : "View in Lotus"}
+                  </Link>
+                </>
+              ) : (
+                <span className="text-ink-faint">
+                  {" "}
+                  · not synced to Lotus yet
+                </span>
+              )}
+            </DetailRow>
+          ) : null}
           <DetailRow label="Product classified">
             {formatDateTime(tx.productMatchedAt)}
           </DetailRow>

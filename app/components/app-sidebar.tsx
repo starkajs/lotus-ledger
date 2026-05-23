@@ -1,4 +1,4 @@
-import { NavLink } from "react-router";
+import { NavLink, useLocation } from "react-router";
 import type { AuthUser } from "~/lib/session.server";
 
 type NavItem = {
@@ -7,7 +7,22 @@ type NavItem = {
   end?: boolean;
   /** Nested under a parent integration link */
   child?: boolean;
+  /** Override NavLink active matching (pathname only, no search). */
+  isActive?: (pathname: string) => boolean;
 };
+
+const STRIPE_TRANSACTIONS_PATH = "/integrations/stripe/transactions";
+const STRIPE_QB_PUSH_RULES_PATH =
+  "/integrations/stripe/transactions/quickbooks-push";
+
+function isStripeTransactionsNavActive(pathname: string): boolean {
+  if (!pathname.startsWith(STRIPE_TRANSACTIONS_PATH)) return false;
+  return !pathname.startsWith(STRIPE_QB_PUSH_RULES_PATH);
+}
+
+function isStripeQuickBooksPushRulesNavActive(pathname: string): boolean {
+  return pathname === STRIPE_QB_PUSH_RULES_PATH;
+}
 
 const navItems: NavItem[] = [
   { to: "/home", label: "Home", end: true },
@@ -19,7 +34,18 @@ const navItems: NavItem[] = [
   { to: "/integrations/woocommerce/orders", label: "WC orders", child: true },
   { to: "/integrations/woocommerce/products", label: "WC products", child: true },
   { to: "/integrations/stripe", label: "Stripe", end: true },
-  { to: "/integrations/stripe/transactions", label: "Transactions", child: true },
+  {
+    to: STRIPE_TRANSACTIONS_PATH,
+    label: "Transactions",
+    child: true,
+    isActive: isStripeTransactionsNavActive,
+  },
+  {
+    to: STRIPE_QB_PUSH_RULES_PATH,
+    label: "QB push rules",
+    child: true,
+    isActive: isStripeQuickBooksPushRulesNavActive,
+  },
   { to: "/integrations/quickbooks", label: "QuickBooks", end: true },
   { to: "/integrations/quickbooks/accounts", label: "QB accounts", child: true },
   { to: "/integrations/quickbooks/classes", label: "QB classes", child: true },
@@ -51,6 +77,8 @@ function navClassName({
 }
 
 export function AppSidebar({ user }: { user: AuthUser }) {
+  const { pathname } = useLocation();
+
   return (
     <aside className="flex h-dvh w-56 shrink-0 flex-col border-r border-sand-dark/40 bg-surface-overlay">
       <div className="flex h-16 shrink-0 items-center gap-2.5 border-b border-sand-dark/40 px-4">
@@ -67,12 +95,17 @@ export function AppSidebar({ user }: { user: AuthUser }) {
         className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-3"
         aria-label="Main"
       >
-        {navItems.map(({ to, label, end, child }) => (
+        {navItems.map(({ to, label, end, child, isActive: isActiveFn }) => (
           <NavLink
             key={to}
             to={to}
             end={end}
-            className={(props) => navClassName({ ...props, child })}
+            className={(props) =>
+              navClassName({
+                isActive: isActiveFn ? isActiveFn(pathname) : props.isActive,
+                child,
+              })
+            }
           >
             {label}
           </NavLink>

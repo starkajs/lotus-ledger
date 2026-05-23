@@ -57,6 +57,8 @@ export type StripeBalanceTransactionRecord = {
   sourceId: string | null;
   stripePaymentIntentId: string | null;
   orderKey: string | null;
+  /** WooCommerce order id from metadata / linked sync (not the internal WC order row uuid). */
+  wcOrderId: number | null;
   reportingCategory: string | null;
   availableOn: string | null;
   stripeCreatedAt: string;
@@ -69,11 +71,14 @@ export type StripeBalanceTransactionRecord = {
   productCode: string | null;
   productName: string | null;
   productQuickbooksItemId: string | null;
+  productVatRatePercent: number;
   productMatchRuleId: string | null;
   productMatchStatus: ProductMatchStatus | null;
   productMatchedAt: string | null;
   pushedToQuickbooks: boolean | null;
   quickbooksPushedAt: string | null;
+  /** QuickBooks Sales Receipt `Id` after push (links to `quickbooks_sales_receipts.quickbooks_id`). */
+  quickbooksSalesReceiptId: string | null;
   /** Set when a synced WC order matches order_key and/or WC order id. */
   linkedWcOrderId: string | null;
   linkedWcOrderNumber: string | null;
@@ -177,6 +182,7 @@ function rowToRecord(
     code: string | null;
     name: string | null;
     quickbooksItemId: string | null;
+    vatRatePercent: number | null;
   } | null,
   linkedWc?: {
     id: string;
@@ -203,6 +209,8 @@ function rowToRecord(
       null,
     orderKey:
       row.orderKey ?? extractOrderKeyFromStripeRaw(row.stripeRaw ?? null),
+    wcOrderId:
+      row.wcOrderId ?? extractWcOrderIdFromStripeRaw(row.stripeRaw ?? null),
     reportingCategory: row.reportingCategory,
     availableOn: row.availableOn?.toISOString() ?? null,
     stripeCreatedAt: row.stripeCreatedAt.toISOString(),
@@ -215,11 +223,13 @@ function rowToRecord(
     productCode: product?.code ?? null,
     productName: product?.name ?? null,
     productQuickbooksItemId: product?.quickbooksItemId ?? null,
+    productVatRatePercent: product?.vatRatePercent ?? 0,
     productMatchRuleId: row.productMatchRuleId,
     productMatchStatus: (row.productMatchStatus as ProductMatchStatus | null) ?? null,
     productMatchedAt: row.productMatchedAt?.toISOString() ?? null,
     pushedToQuickbooks: row.pushedToQuickbooks,
     quickbooksPushedAt: row.quickbooksPushedAt?.toISOString() ?? null,
+    quickbooksSalesReceiptId: row.quickbooksSalesReceiptId,
     linkedWcOrderId: linkedWc?.id ?? null,
     linkedWcOrderNumber: linkedWc?.orderNumber ?? null,
     linkedWcWcOrderId: linkedWc?.wcOrderId ?? null,
@@ -469,6 +479,7 @@ export async function listStripeBalanceTransactions(
       productCode: products.code,
       productName: products.name,
       productQuickbooksItemId: products.quickbooksItemId,
+      productVatRatePercent: products.vatRatePercent,
       linkedWcOrderId: woocommerceOrders.id,
       linkedWcOrderNumber: woocommerceOrders.orderNumber,
       linkedWcWcOrderId: woocommerceOrders.wcOrderId,
@@ -494,6 +505,7 @@ export async function listStripeBalanceTransactions(
           code: row.productCode,
           name: row.productName,
           quickbooksItemId: row.productQuickbooksItemId,
+          vatRatePercent: row.productVatRatePercent,
         },
         row.linkedWcOrderId
           ? {
@@ -789,11 +801,40 @@ export type StripeBalanceTransactionDetail = StripeBalanceTransactionRecord & {
   livemode: boolean;
 };
 
-export async function getStripeBalanceTransactionById(
-  id: string,
+const LOTUS_TXN_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function rowToTransactionDetail(row: {
+  transaction: typeof stripeBalanceTransactions.$inferSelect;
+  connectionLabel: string | null;
+  livemode: boolean;
+  memberEmail: string | null;
+  memberName: string | null;
+  productCode: string | null;
+  productName: string | null;
+  productQuickbooksItemId: string | null;
+  productVatRatePercent: number | null;
+}): StripeBalanceTransactionDetail {
+  return {
+    ...rowToRecord(
+      row.transaction,
+      { email: row.memberEmail, name: row.memberName },
+      {
+        code: row.productCode,
+        name: row.productName,
+        quickbooksItemId: row.productQuickbooksItemId,
+        vatRatePercent: row.productVatRatePercent,
+      },
+    ),
+    connectionLabel: row.connectionLabel,
+    livemode: row.livemode,
+  };
+}
+
+async function fetchStripeBalanceTransactionDetail(
+  where: ReturnType<typeof eq>,
 ): Promise<StripeBalanceTransactionDetail | null> {
   const db = getDb();
-
   const [row] = await db
     .select({
       transaction: stripeBalanceTransactions,
@@ -804,6 +845,7 @@ export async function getStripeBalanceTransactionById(
       productCode: products.code,
       productName: products.name,
       productQuickbooksItemId: products.quickbooksItemId,
+      productVatRatePercent: products.vatRatePercent,
     })
     .from(stripeBalanceTransactions)
     .innerJoin(
@@ -815,24 +857,80 @@ export async function getStripeBalanceTransactionById(
       eq(stripeBalanceTransactions.communityMemberId, communityMembers.id),
     )
     .leftJoin(products, eq(stripeBalanceTransactions.productId, products.id))
-    .where(eq(stripeBalanceTransactions.id, id))
+    .where(where)
     .limit(1);
 
-  if (!row) return null;
+  return row ? rowToTransactionDetail(row) : null;
+}
 
-  return {
-    ...rowToRecord(
-      row.transaction,
-      { email: row.memberEmail, name: row.memberName },
-      {
-        code: row.productCode,
-        name: row.productName,
-        quickbooksItemId: row.productQuickbooksItemId,
-      },
-    ),
-    connectionLabel: row.connectionLabel,
-    livemode: row.livemode,
-  };
+export async function getStripeBalanceTransactionById(
+  id: string,
+): Promise<StripeBalanceTransactionDetail | null> {
+  return fetchStripeBalanceTransactionDetail(eq(stripeBalanceTransactions.id, id));
+}
+
+/**
+ * Resolve a synced transaction from Lotus UUID, Stripe `txn_…`, or `pi_…` (preview / search).
+ */
+export async function getStripeBalanceTransactionByPreviewRef(
+  ref: string,
+): Promise<StripeBalanceTransactionDetail | null> {
+  const trimmed = ref.trim();
+  if (!trimmed) return null;
+
+  if (LOTUS_TXN_UUID_RE.test(trimmed)) {
+    return getStripeBalanceTransactionById(trimmed);
+  }
+
+  if (trimmed.startsWith("txn_")) {
+    return fetchStripeBalanceTransactionDetail(
+      eq(stripeBalanceTransactions.stripeBalanceTransactionId, trimmed),
+    );
+  }
+
+  if (trimmed.startsWith("pi_")) {
+    return fetchStripeBalanceTransactionDetail(
+      eq(stripeBalanceTransactions.stripePaymentIntentId, trimmed),
+    );
+  }
+
+  return null;
+}
+
+/** Persist QuickBooks `SalesReceipt.Id` after a successful push. */
+export async function setStripeBalanceTransactionQuickBooksSalesReceipt(
+  lotusTransactionId: string,
+  quickbooksSalesReceiptId: string,
+): Promise<void> {
+  const db = getDb();
+  const now = new Date();
+  await db
+    .update(stripeBalanceTransactions)
+    .set({
+      quickbooksSalesReceiptId,
+      pushedToQuickbooks: true,
+      quickbooksPushedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(stripeBalanceTransactions.id, lotusTransactionId));
+}
+
+export async function getStripeBalanceTransactionByQuickBooksSalesReceiptId(
+  quickbooksSalesReceiptId: string,
+): Promise<StripeBalanceTransactionRecord | null> {
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(stripeBalanceTransactions)
+    .where(
+      eq(
+        stripeBalanceTransactions.quickbooksSalesReceiptId,
+        quickbooksSalesReceiptId,
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  return rowToRecord(row);
 }
 
 export type StripeBalanceTransactionForMember = StripeBalanceTransactionRecord & {
@@ -941,6 +1039,7 @@ export async function listStripeBalanceTransactionsForMember(
       productCode: products.code,
       productName: products.name,
       productQuickbooksItemId: products.quickbooksItemId,
+      productVatRatePercent: products.vatRatePercent,
     })
     .from(stripeBalanceTransactions)
     .innerJoin(
@@ -966,6 +1065,7 @@ export async function listStripeBalanceTransactionsForMember(
           code: row.productCode,
           name: row.productName,
           quickbooksItemId: row.productQuickbooksItemId,
+          vatRatePercent: row.productVatRatePercent,
         },
       ),
       connectionLabel: row.connectionLabel,

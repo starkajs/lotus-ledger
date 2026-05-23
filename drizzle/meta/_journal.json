@@ -197,6 +197,48 @@
       "when": 1782100000000,
       "tag": "0027_stripe_wc_order_id",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1782200000000,
+      "tag": "0028_stripe_quickbooks_push_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1782300000000,
+      "tag": "0029_quickbooks_tax_codes",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1782400000000,
+      "tag": "0030_products_vat_rate",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1782500000000,
+      "tag": "0031_stripe_qb_push_mapping",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1782600000000,
+      "tag": "0032_stripe_qb_payment_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1782700000000,
+      "tag": "0033_stripe_quickbooks_sales_receipt_link",
+      "breakpoints": true
     }
   ]
 }

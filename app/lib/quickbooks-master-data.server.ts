@@ -4,7 +4,14 @@ import {
   quickbooksAccounts,
   quickbooksClasses,
   quickbooksItems,
+  quickbooksPaymentMethods,
+  quickbooksTaxCodes,
 } from "~/db/schema";
+import {
+  extractClassRefFromItemRaw,
+  extractSalesTaxCodeRefFromItemRaw,
+  quickbooksRefName,
+} from "~/lib/quickbooks-tax-code";
 import {
   runIntegrationJob,
   type IntegrationAuditContext,
@@ -46,6 +53,32 @@ type QbItemRow = {
   UnitPrice?: number;
   Active?: boolean;
   IncomeAccountRef?: { value?: string; name?: string };
+  SalesTaxCodeRef?: { value?: string; name?: string };
+  PurchaseTaxCodeRef?: { value?: string; name?: string };
+};
+
+type QbTaxCodeRow = {
+  Id?: string;
+  Name?: string;
+  Description?: string;
+  Active?: boolean;
+  Taxable?: boolean;
+};
+
+type QbPaymentMethodRow = {
+  Id?: string;
+  Name?: string;
+  Type?: string;
+  Active?: boolean;
+};
+
+export type QuickBooksPaymentMethodRecord = {
+  id: string;
+  quickbooksId: string;
+  name: string;
+  type: string | null;
+  active: boolean;
+  syncedAt: string;
 };
 
 export type QuickBooksAccountRecord = {
@@ -79,7 +112,28 @@ export type QuickBooksItemRecord = {
   description: string | null;
   unitPrice: string | null;
   incomeAccountRef: string | null;
+  quickbooksClassRef: string | null;
+  salesTaxCodeRef: string | null;
   active: boolean;
+  syncedAt: string;
+};
+
+export type QuickBooksItemPushDefaults = {
+  quickbooksId: string;
+  name: string;
+  incomeAccountRef: string | null;
+  quickbooksClassRef: string | null;
+  quickbooksClassName: string | null;
+  salesTaxCodeRef: string | null;
+};
+
+export type QuickBooksTaxCodeRecord = {
+  id: string;
+  quickbooksId: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  taxable: boolean | null;
   syncedAt: string;
 };
 
@@ -314,6 +368,9 @@ async function syncQuickBooksItemsInner(): Promise<QuickBooksMasterDataSyncResul
       row.UnitPrice !== undefined && row.UnitPrice !== null
         ? String(row.UnitPrice)
         : null;
+    const itemRaw = row as Record<string, unknown>;
+    const salesTaxCodeRef = extractSalesTaxCodeRefFromItemRaw(itemRaw);
+    const quickbooksClassRef = extractClassRefFromItemRaw(itemRaw);
 
     const result = await upsertByQuickBooksId({
       realmId,
@@ -326,8 +383,9 @@ async function syncQuickBooksItemsInner(): Promise<QuickBooksMasterDataSyncResul
         description: row.Description?.trim() || null,
         unitPrice,
         incomeAccountRef: row.IncomeAccountRef?.value ?? null,
+        salesTaxCodeRef,
         active: row.Active !== false,
-        quickbooksRaw: row as Record<string, unknown>,
+        quickbooksRaw: itemRaw,
       }),
       buildUpdate: () => ({
         name,
@@ -336,8 +394,9 @@ async function syncQuickBooksItemsInner(): Promise<QuickBooksMasterDataSyncResul
         description: row.Description?.trim() || null,
         unitPrice,
         incomeAccountRef: row.IncomeAccountRef?.value ?? null,
+        salesTaxCodeRef,
         active: row.Active !== false,
-        quickbooksRaw: row as Record<string, unknown>,
+        quickbooksRaw: itemRaw,
       }),
       findExisting: async () => {
         const [existing] = await db
@@ -367,12 +426,185 @@ async function syncQuickBooksItemsInner(): Promise<QuickBooksMasterDataSyncResul
     else updated += 1;
   }
 
+  await syncQuickBooksTaxCodesInner();
+  await syncQuickBooksPaymentMethodsInner();
+
   return {
     created,
     updated,
     total: rows.length,
     syncedAt: syncedAt.toISOString(),
   };
+}
+
+async function syncQuickBooksPaymentMethodsInner(): Promise<QuickBooksMasterDataSyncResult> {
+  const realmId = await resolveRealmId();
+  const rows = await queryQuickBooksAll<QbPaymentMethodRow>(
+    "select * from PaymentMethod",
+    "PaymentMethod",
+  );
+  const db = getDb();
+  const syncedAt = new Date();
+  let created = 0;
+  let updated = 0;
+
+  for (const row of rows) {
+    const quickbooksId = row.Id?.trim();
+    const name = row.Name?.trim();
+    if (!quickbooksId || !name) continue;
+
+    const result = await upsertByQuickBooksId({
+      realmId,
+      quickbooksId,
+      syncedAt,
+      buildInsert: () => ({
+        name,
+        type: row.Type?.trim() || null,
+        active: row.Active !== false,
+        quickbooksRaw: row as Record<string, unknown>,
+      }),
+      buildUpdate: () => ({
+        name,
+        type: row.Type?.trim() || null,
+        active: row.Active !== false,
+        quickbooksRaw: row as Record<string, unknown>,
+      }),
+      findExisting: async () => {
+        const [existing] = await db
+          .select({ id: quickbooksPaymentMethods.id })
+          .from(quickbooksPaymentMethods)
+          .where(
+            and(
+              eq(quickbooksPaymentMethods.realmId, realmId),
+              eq(quickbooksPaymentMethods.quickbooksId, quickbooksId),
+            ),
+          )
+          .limit(1);
+        return existing;
+      },
+      insert: async (values) => {
+        await db
+          .insert(quickbooksPaymentMethods)
+          .values(values as typeof quickbooksPaymentMethods.$inferInsert);
+      },
+      update: async (id, values) => {
+        await db
+          .update(quickbooksPaymentMethods)
+          .set(values as Partial<typeof quickbooksPaymentMethods.$inferInsert>)
+          .where(eq(quickbooksPaymentMethods.id, id));
+      },
+    });
+
+    if (result === "created") created += 1;
+    else updated += 1;
+  }
+
+  return {
+    created,
+    updated,
+    total: rows.length,
+    syncedAt: syncedAt.toISOString(),
+  };
+}
+
+export async function syncQuickBooksPaymentMethods(
+  audit?: IntegrationAuditContext,
+): Promise<QuickBooksMasterDataSyncResult> {
+  const ctx = audit ?? { triggeredBy: "cli" as const };
+  return runIntegrationJob(
+    {
+      jobType: "quickbooks_payment_methods_sync",
+      triggeredBy: ctx.triggeredBy,
+      userId: ctx.userId,
+    },
+    () => syncQuickBooksPaymentMethodsInner(),
+  );
+}
+
+async function syncQuickBooksTaxCodesInner(): Promise<QuickBooksMasterDataSyncResult> {
+  const realmId = await resolveRealmId();
+  const rows = await queryQuickBooksAll<QbTaxCodeRow>(
+    "select * from TaxCode",
+    "TaxCode",
+  );
+  const db = getDb();
+  const syncedAt = new Date();
+  let created = 0;
+  let updated = 0;
+
+  for (const row of rows) {
+    const quickbooksId = row.Id?.trim();
+    const name = row.Name?.trim();
+    if (!quickbooksId || !name) continue;
+
+    const result = await upsertByQuickBooksId({
+      realmId,
+      quickbooksId,
+      syncedAt,
+      buildInsert: () => ({
+        name,
+        description: row.Description?.trim() || null,
+        active: row.Active !== false,
+        taxable: row.Taxable ?? null,
+        quickbooksRaw: row as Record<string, unknown>,
+      }),
+      buildUpdate: () => ({
+        name,
+        description: row.Description?.trim() || null,
+        active: row.Active !== false,
+        taxable: row.Taxable ?? null,
+        quickbooksRaw: row as Record<string, unknown>,
+      }),
+      findExisting: async () => {
+        const [existing] = await db
+          .select({ id: quickbooksTaxCodes.id })
+          .from(quickbooksTaxCodes)
+          .where(
+            and(
+              eq(quickbooksTaxCodes.realmId, realmId),
+              eq(quickbooksTaxCodes.quickbooksId, quickbooksId),
+            ),
+          )
+          .limit(1);
+        return existing;
+      },
+      insert: async (values) => {
+        await db
+          .insert(quickbooksTaxCodes)
+          .values(values as typeof quickbooksTaxCodes.$inferInsert);
+      },
+      update: async (id, values) => {
+        await db
+          .update(quickbooksTaxCodes)
+          .set(values as Partial<typeof quickbooksTaxCodes.$inferInsert>)
+          .where(eq(quickbooksTaxCodes.id, id));
+      },
+    });
+
+    if (result === "created") created += 1;
+    else updated += 1;
+  }
+
+  return {
+    created,
+    updated,
+    total: rows.length,
+    syncedAt: syncedAt.toISOString(),
+  };
+}
+
+export async function syncQuickBooksTaxCodes(
+  audit?: IntegrationAuditContext,
+): Promise<QuickBooksMasterDataSyncResult> {
+  const ctx = audit ?? { triggeredBy: "cli" as const };
+  return runIntegrationJob(
+    {
+      jobType: "quickbooks_tax_codes_sync",
+      triggeredBy: ctx.triggeredBy,
+      userId: ctx.userId,
+    },
+    () => syncQuickBooksTaxCodesInner(),
+  );
 }
 
 export async function syncQuickBooksItems(
@@ -390,7 +622,12 @@ export async function syncQuickBooksItems(
 }
 
 async function latestSyncedAt(
-  table: typeof quickbooksAccounts | typeof quickbooksClasses | typeof quickbooksItems,
+  table:
+    | typeof quickbooksAccounts
+    | typeof quickbooksClasses
+    | typeof quickbooksItems
+    | typeof quickbooksTaxCodes
+    | typeof quickbooksPaymentMethods,
   realmId: string | null,
 ): Promise<string | null> {
   if (!realmId) return null;
@@ -509,6 +746,120 @@ export async function listQuickBooksItems(): Promise<{
       description: row.description,
       unitPrice: row.unitPrice,
       incomeAccountRef: row.incomeAccountRef,
+      quickbooksClassRef: row.quickbooksClassRef,
+      salesTaxCodeRef: row.salesTaxCodeRef,
+      active: row.active,
+      syncedAt: row.syncedAt.toISOString(),
+    })),
+  };
+}
+
+export async function getQuickBooksItemPushDefaults(
+  quickbooksItemId: string | null | undefined,
+): Promise<QuickBooksItemPushDefaults | null> {
+  if (!quickbooksItemId?.trim()) return null;
+  const tokens = await getQuickBooksTokens();
+  if (!tokens) return null;
+
+  const db = getDb();
+  const [row] = await db
+    .select()
+    .from(quickbooksItems)
+    .where(
+      and(
+        eq(quickbooksItems.realmId, tokens.realmId),
+        eq(quickbooksItems.quickbooksId, quickbooksItemId.trim()),
+      ),
+    )
+    .limit(1);
+
+  if (!row) return null;
+  const raw = row.quickbooksRaw ?? null;
+  return {
+    quickbooksId: row.quickbooksId,
+    name: row.name,
+    incomeAccountRef: row.incomeAccountRef,
+    quickbooksClassRef:
+      row.quickbooksClassRef ?? extractClassRefFromItemRaw(raw),
+    quickbooksClassName: raw ? quickbooksRefName(raw.ClassRef) : null,
+    salesTaxCodeRef:
+      row.salesTaxCodeRef ?? extractSalesTaxCodeRefFromItemRaw(raw),
+  };
+}
+
+/** @deprecated Use getQuickBooksItemPushDefaults */
+export async function getQuickBooksSalesTaxCodeRefForItem(
+  quickbooksItemId: string | null | undefined,
+): Promise<string | null> {
+  const item = await getQuickBooksItemPushDefaults(quickbooksItemId);
+  return item?.salesTaxCodeRef ?? null;
+}
+
+export async function listQuickBooksTaxCodes(): Promise<{
+  connected: boolean;
+  realmId: string | null;
+  companyName: string | null;
+  lastSyncedAt: string | null;
+  taxCodes: QuickBooksTaxCodeRecord[];
+}> {
+  const tokens = await getQuickBooksTokens();
+  const realmId = tokens?.realmId ?? null;
+  const db = getDb();
+
+  const taxCodes = realmId
+    ? await db
+        .select()
+        .from(quickbooksTaxCodes)
+        .where(eq(quickbooksTaxCodes.realmId, realmId))
+        .orderBy(asc(quickbooksTaxCodes.name))
+    : [];
+
+  return {
+    connected: Boolean(tokens),
+    realmId,
+    companyName: tokens?.companyName ?? null,
+    lastSyncedAt: await latestSyncedAt(quickbooksTaxCodes, realmId),
+    taxCodes: taxCodes.map((row) => ({
+      id: row.id,
+      quickbooksId: row.quickbooksId,
+      name: row.name,
+      description: row.description,
+      active: row.active,
+      taxable: row.taxable,
+      syncedAt: row.syncedAt.toISOString(),
+    })),
+  };
+}
+
+export async function listQuickBooksPaymentMethods(): Promise<{
+  connected: boolean;
+  realmId: string | null;
+  companyName: string | null;
+  lastSyncedAt: string | null;
+  paymentMethods: QuickBooksPaymentMethodRecord[];
+}> {
+  const tokens = await getQuickBooksTokens();
+  const realmId = tokens?.realmId ?? null;
+  const db = getDb();
+
+  const paymentMethods = realmId
+    ? await db
+        .select()
+        .from(quickbooksPaymentMethods)
+        .where(eq(quickbooksPaymentMethods.realmId, realmId))
+        .orderBy(asc(quickbooksPaymentMethods.name))
+    : [];
+
+  return {
+    connected: Boolean(tokens),
+    realmId,
+    companyName: tokens?.companyName ?? null,
+    lastSyncedAt: await latestSyncedAt(quickbooksPaymentMethods, realmId),
+    paymentMethods: paymentMethods.map((row) => ({
+      id: row.id,
+      quickbooksId: row.quickbooksId,
+      name: row.name,
+      type: row.type,
       active: row.active,
       syncedAt: row.syncedAt.toISOString(),
     })),
