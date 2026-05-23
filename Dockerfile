@@ -21,6 +21,6 @@ COPY --from=build-env /app/build /app/build
 COPY ./app/db /app/app/db
 COPY ./drizzle /app/drizzle
 COPY ./drizzle.config.ts /app/drizzle.config.ts
-COPY ./scripts/db-migrate.mjs /app/scripts/db-migrate.mjs
+COPY ./scripts/db-migrate.mjs ./scripts/check-drizzle-migrations.mjs /app/scripts/
 WORKDIR /app
 CMD ["npm", "run", "start"]
