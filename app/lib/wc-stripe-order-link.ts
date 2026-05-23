@@ -27,6 +27,24 @@ export function normalizeOrderKey(value: string | null | undefined): string | nu
   return trimmed ? trimmed : null;
 }
 
+/** In-memory link check (order_key and/or WC order id). */
+export function wooCommerceOrderMatchesStripeTransaction(
+  order: { orderKey: string | null; wcOrderId: number },
+  stripe: { orderKey: string | null; wcOrderId: number | null },
+): boolean {
+  const orderKey = normalizeOrderKey(order.orderKey);
+  const stripeKey = normalizeOrderKey(stripe.orderKey);
+  if (orderKey && stripeKey && orderKey === stripeKey) return true;
+  if (
+    stripe.wcOrderId != null &&
+    stripe.wcOrderId > 0 &&
+    stripe.wcOrderId === order.wcOrderId
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** WC REST `order_key` (also present on synced `wc_raw`). */
 export function extractOrderKeyFromWooCommerceOrder(
   order: WooCommerceOrder | Record<string, unknown>,

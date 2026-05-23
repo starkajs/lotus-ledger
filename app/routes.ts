@@ -13,6 +13,8 @@ export default [
     route("community/:memberId", "routes/community.$memberId.tsx"),
     route("products", "routes/products.tsx"),
     route("products/rules", "routes/products.rules.tsx"),
+    route("reconciliations", "routes/reconciliations.tsx"),
+    route("reconciliations/wc-stripe", "routes/reconciliations.wc-stripe.tsx"),
     route("users", "routes/users.tsx"),
     route("integrations/invite", "routes/integrations.invite.tsx"),
     route("integrations/jobs", "routes/integrations.jobs.tsx"),

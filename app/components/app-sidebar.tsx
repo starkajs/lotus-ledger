@@ -13,6 +13,8 @@ const navItems: NavItem[] = [
   { to: "/home", label: "Home", end: true },
   { to: "/community", label: "Community" },
   { to: "/products", label: "Products" },
+  { to: "/reconciliations", label: "Reconciliations", end: true },
+  { to: "/reconciliations/wc-stripe", label: "WC ↔ Stripe", child: true },
   { to: "/integrations/woocommerce", label: "WooCommerce", end: true },
   { to: "/integrations/woocommerce/orders", label: "WC orders", child: true },
   { to: "/integrations/woocommerce/products", label: "WC products", child: true },
