@@ -1,0 +1,3 @@
+# Lotus Ledger — sequential integration sync (WooCommerce → Stripe → push to QuickBooks → pull QB receipts)
+# Default: daily at 02:00 UTC. Edit schedule at https://crontab.guru/
+0 2 * * * cd /app && npm run sync:integrations-cron >> /proc/1/fd/1 2>&1

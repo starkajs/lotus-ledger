@@ -6,6 +6,7 @@ import {
   stripeBalanceTransactions,
 } from "~/db/schema";
 import type { StripeBalanceTransactionRecord } from "./stripe-balance-transactions.server";
+import { getProductById } from "./products.server";
 import {
   type ClassificationAuditContext,
   recordClassificationEvent,
@@ -24,7 +25,12 @@ export {
   extractStripeTransactionProductSignals,
 } from "./stripe-transaction-signals";
 
-export type ProductMatchStatus = "matched" | "unmatched" | "manual" | "ambiguous";
+export type ProductMatchStatus =
+  import("./stripe-product-bulk-assign").ProductMatchStatus;
+export {
+  canBulkAssignStripeTransactionProduct,
+} from "./stripe-product-bulk-assign";
+import { canBulkAssignStripeTransactionProduct } from "./stripe-product-bulk-assign";
 
 export type ProductMatchRuleRecord = {
   id: string;
@@ -375,6 +381,78 @@ export async function setStripeTransactionProductManual(
       action: "manual_set",
     },
   });
+}
+
+export type BulkSetStripeTransactionsProductManualResult = {
+  updated: number;
+  skipped: number;
+  skippedManual: number;
+  skippedMatched: number;
+  notFound: number;
+};
+
+export async function bulkSetStripeTransactionsProductManual(
+  transactionIds: string[],
+  productId: string,
+  audit?: IntegrationAuditContext,
+): Promise<BulkSetStripeTransactionsProductManualResult> {
+  const product = await getProductById(productId);
+  if (!product) {
+    throw new Error("Product not found");
+  }
+
+  const uniqueIds = [...new Set(transactionIds.map((id) => id.trim()).filter(Boolean))];
+  const result: BulkSetStripeTransactionsProductManualResult = {
+    updated: 0,
+    skipped: 0,
+    skippedManual: 0,
+    skippedMatched: 0,
+    notFound: 0,
+  };
+
+  if (uniqueIds.length === 0) return result;
+
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: stripeBalanceTransactions.id,
+      productId: stripeBalanceTransactions.productId,
+      productMatchStatus: stripeBalanceTransactions.productMatchStatus,
+    })
+    .from(stripeBalanceTransactions)
+    .where(inArray(stripeBalanceTransactions.id, uniqueIds));
+
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+
+  for (const transactionId of uniqueIds) {
+    const row = rowById.get(transactionId);
+    if (!row) {
+      result.notFound += 1;
+      continue;
+    }
+    if (row.productMatchStatus === "manual") {
+      result.skippedManual += 1;
+      result.skipped += 1;
+      continue;
+    }
+    if (row.productMatchStatus === "matched" && row.productId) {
+      result.skippedMatched += 1;
+      result.skipped += 1;
+      continue;
+    }
+    if (!canBulkAssignStripeTransactionProduct({
+      productId: row.productId,
+      productMatchStatus: row.productMatchStatus as ProductMatchStatus | null,
+    })) {
+      result.skipped += 1;
+      continue;
+    }
+
+    await setStripeTransactionProductManual(transactionId, productId, audit);
+    result.updated += 1;
+  }
+
+  return result;
 }
 
 export function canPushTransactionToQuickbooks(

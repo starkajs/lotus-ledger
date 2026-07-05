@@ -12,6 +12,7 @@ export const INTEGRATION_JOB_TYPES = [
   "quickbooks_payment_methods_sync",
   "quickbooks_sales_receipts_sync",
   "quickbooks_refund_receipts_sync",
+  "integrations_sequential_sync",
 ] as const;
 
 export type IntegrationJobType = (typeof INTEGRATION_JOB_TYPES)[number];
@@ -32,6 +33,7 @@ export const INTEGRATION_JOB_TYPE_LABELS: Record<IntegrationJobType, string> = {
   quickbooks_payment_methods_sync: "QuickBooks payment methods sync",
   quickbooks_sales_receipts_sync: "QuickBooks sales receipts sync",
   quickbooks_refund_receipts_sync: "QuickBooks refund receipts sync",
+  integrations_sequential_sync: "Sequential integration sync (WC → Stripe → QB push → QB pull)",
 };
 
 export type IntegrationAuditContext = {

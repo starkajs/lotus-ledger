@@ -10,9 +10,10 @@ import {
   pushStripeBalanceTransactionToQuickBooks,
 } from "~/lib/stripe-quickbooks-push-execute.server";
 import {
-  planStripeQuickBooksPushForTransaction,
-  type StripeQuickBooksPushPlan,
-} from "~/lib/stripe-quickbooks-push-plan.server";
+  loadStripeQuickBooksPushPreview,
+  type StripeQuickBooksPushItemDiagnostics,
+} from "~/lib/stripe-quickbooks-push-diagnostics.server";
+import type { StripeQuickBooksPushPlan } from "~/lib/stripe-quickbooks-push-plan.server";
 import { getStripeBalanceTransactionByPreviewRef } from "~/lib/stripe-balance-transactions.server";
 import { requireUser } from "~/lib/session.server";
 
@@ -37,6 +38,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   ]);
 
   let previewPlan: StripeQuickBooksPushPlan | null = null;
+  let previewItemDiagnostics: StripeQuickBooksPushItemDiagnostics | null =
+    null;
   let previewTxnId: string | null = null;
   let previewPushed = false;
   let previewQuickbooksSalesReceiptId: string | null = null;
@@ -50,9 +53,9 @@ export async function loader({ request }: Route.LoaderArgs) {
         Boolean(tx.quickbooksRefundReceiptId);
       previewQuickbooksSalesReceiptId =
         tx.quickbooksSalesReceiptId ?? tx.quickbooksRefundReceiptId;
-      previewPlan = await planStripeQuickBooksPushForTransaction({
-        transaction: tx,
-      });
+      const preview = await loadStripeQuickBooksPushPreview({ transaction: tx });
+      previewPlan = preview.plan;
+      previewItemDiagnostics = preview.itemDiagnostics;
     }
   }
 
@@ -66,6 +69,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     previewId,
     previewTxnId,
     previewPlan,
+    previewItemDiagnostics,
     previewPushed,
     previewQuickbooksSalesReceiptId,
   };
@@ -139,6 +143,7 @@ export default function StripeQuickBooksPushPage({
     previewId,
     previewTxnId,
     previewPlan,
+    previewItemDiagnostics,
     previewPushed,
     previewQuickbooksSalesReceiptId,
   } = loaderData;
@@ -260,6 +265,156 @@ export default function StripeQuickBooksPushPage({
                   <li key={issue}>{issue}</li>
                 ))}
               </ul>
+            )}
+            {previewItemDiagnostics && (
+              <div className="rounded-jamyang border border-sand-dark/40 bg-surface p-3 space-y-2">
+                <h3 className="text-xs font-medium text-dark">
+                  Item mapping trace
+                </h3>
+                <p className="text-xs text-ink-muted">
+                  Lotus product →{" "}
+                  <code className="font-mono">products.quickbooks_item_id</code>{" "}
+                  → Lotus{" "}
+                  <code className="font-mono">quickbooks_items</code> cache →
+                  live QuickBooks Item query →{" "}
+                  <code className="font-mono">ItemRef.value</code> in the POST
+                  body.
+                </p>
+                <dl className="grid gap-2 text-xs sm:grid-cols-2">
+                  <div>
+                    <dt className="text-ink-muted">Lotus product</dt>
+                    <dd className="font-mono text-dark">
+                      {previewItemDiagnostics.lotusProduct ? (
+                        <>
+                          {previewItemDiagnostics.lotusProduct.code} ·{" "}
+                          {previewItemDiagnostics.lotusProduct.name}
+                          <span className="block text-ink-muted">
+                            QB item id:{" "}
+                            {previewItemDiagnostics.lotusProduct
+                              .quickbooksItemId ?? "—"}
+                          </span>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-ink-muted">
+                      Synced in Lotus (quickbooks_items)
+                    </dt>
+                    <dd className="font-mono text-dark">
+                      {previewItemDiagnostics.syncedQuickBooksItem ? (
+                        <>
+                          {previewItemDiagnostics.syncedQuickBooksItem.name}{" "}
+                          (Id{" "}
+                          {
+                            previewItemDiagnostics.syncedQuickBooksItem
+                              .quickbooksId
+                          }
+                          )
+                          <span className="block text-ink-muted">
+                            {previewItemDiagnostics.syncedQuickBooksItem.active
+                              ? "active"
+                              : "inactive"}
+                            {" · "}
+                            {
+                              previewItemDiagnostics.syncedQuickBooksItem
+                                .itemType
+                            }
+                          </span>
+                        </>
+                      ) : (
+                        "Not found for current QuickBooks company"
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-ink-muted">Live QuickBooks query</dt>
+                    <dd className="font-mono text-dark">
+                      {previewItemDiagnostics.liveQuickBooksItem ? (
+                        <>
+                          {previewItemDiagnostics.liveQuickBooksItem.name}{" "}
+                          (Id{" "}
+                          {
+                            previewItemDiagnostics.liveQuickBooksItem
+                              .quickbooksId
+                          }
+                          )
+                          <span className="block text-ink-muted">
+                            {previewItemDiagnostics.liveQuickBooksItem.active
+                              ? "active"
+                              : "inactive"}
+                            {" · "}
+                            {
+                              previewItemDiagnostics.liveQuickBooksItem
+                                .itemType
+                            }
+                          </span>
+                        </>
+                      ) : previewItemDiagnostics.itemRefValue ? (
+                        <span className="text-maroon">
+                          No Item with Id &quot;
+                          {previewItemDiagnostics.itemRefValue}&quot; in
+                          connected company
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-ink-muted">Sent to QuickBooks</dt>
+                    <dd className="font-mono text-dark">
+                      ItemRef.value={previewItemDiagnostics.itemRefValue ?? "—"}
+                      {previewItemDiagnostics.itemRefName ? (
+                        <span className="block text-ink-muted">
+                          name={previewItemDiagnostics.itemRefName}
+                        </span>
+                      ) : null}
+                      {previewItemDiagnostics.taxCodeRefValue ? (
+                        <span className="block text-ink-muted">
+                          TaxCodeRef.value=
+                          {previewItemDiagnostics.taxCodeRefValue}
+                        </span>
+                      ) : null}
+                      {previewItemDiagnostics.itemAccountRefValue ? (
+                        <span className="block text-ink-muted">
+                          ItemAccountRef.value=
+                          {previewItemDiagnostics.itemAccountRefValue}
+                        </span>
+                      ) : null}
+                      {previewItemDiagnostics.classRefValue ? (
+                        <span className="block text-ink-muted">
+                          ClassRef.value={previewItemDiagnostics.classRefValue}
+                        </span>
+                      ) : null}
+                    </dd>
+                  </div>
+                </dl>
+                {previewItemDiagnostics.warnings.length > 0 && (
+                  <ul className="list-disc pl-5 text-sm text-amber-800 space-y-1">
+                    {previewItemDiagnostics.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                )}
+                <p className="text-xs text-ink-muted">
+                  If Lotus shows the item but live query fails, the Id on{" "}
+                  <Link to="/products" className="text-teal underline">
+                    /products
+                  </Link>{" "}
+                  is likely wrong (name instead of Id), from another company, or
+                  stale. Compare with{" "}
+                  <Link
+                    to="/integrations/quickbooks/items"
+                    className="text-teal underline"
+                  >
+                    Products &amp; services
+                  </Link>{" "}
+                  QB ID column.
+                </p>
+              </div>
             )}
             {(previewPlan.salesReceipt || previewPlan.refundReceipt) && (
               <>

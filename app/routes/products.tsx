@@ -4,7 +4,7 @@ import type { Route } from "./+types/products";
 import { ActionToast } from "~/components/action-toast";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
-import { listQuickBooksTaxCodes } from "~/lib/quickbooks-master-data.server";
+import { listQuickBooksTaxCodes, listQuickBooksItems, syncQuickBooksItems } from "~/lib/quickbooks-master-data.server";
 import {
   countStripeTransactionsPerProduct,
   createProduct,
@@ -25,6 +25,15 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
+  let qbItems = await listQuickBooksItems();
+  if (qbItems.connected && qbItems.items.length === 0) {
+    try {
+      await syncQuickBooksItems({ triggeredBy: "app" });
+      qbItems = await listQuickBooksItems();
+    } catch {
+      // Leave empty; banner below links to manual refresh.
+    }
+  }
   const [products, stripeTransactionCountByProductId, qbTaxCodes] =
     await Promise.all([
       listProducts(),
@@ -32,18 +41,32 @@ export async function loader({ request }: Route.LoaderArgs) {
       listQuickBooksTaxCodes(),
     ]);
   const activeTaxCodes = qbTaxCodes.taxCodes.filter((t) => t.active);
+  const activeQbItems = qbItems.items.filter((item) => item.active);
   return {
     products,
     stripeTransactionCountByProductId,
     qbConnected: qbTaxCodes.connected,
+    qbItemsConnected: qbItems.connected,
     taxCodes: activeTaxCodes,
+    qbItems: activeQbItems,
   };
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
+
+  async function refreshQuickBooksItemsIfConnected() {
+    try {
+      return await syncQuickBooksItems({
+        triggeredBy: "app",
+        userId: user.id,
+      });
+    } catch {
+      return null;
+    }
+  }
 
   if (intent === "create") {
     const code = String(form.get("code") ?? "").trim();
@@ -67,7 +90,12 @@ export async function action({ request }: Route.ActionArgs) {
         quickbooksTaxCodeId,
         vatRatePercent: vatParsed.value,
       });
-      return { scope: "create" as const, success: true as const };
+      const qbItemsSync = await refreshQuickBooksItemsIfConnected();
+      return {
+        scope: "create" as const,
+        success: true as const,
+        qbItemsSync,
+      };
     } catch (err) {
       return {
         scope: "create" as const,
@@ -98,10 +126,12 @@ export async function action({ request }: Route.ActionArgs) {
       vatRatePercent: vatParsed.value,
       isActive,
     });
+    const qbItemsSync = await refreshQuickBooksItemsIfConnected();
     return {
       scope: "update" as const,
       success: true as const,
       code: String(form.get("code") ?? ""),
+      qbItemsSync,
     };
   }
 
@@ -124,23 +154,67 @@ export async function action({ request }: Route.ActionArgs) {
   return { scope: "unknown" as const, error: "Unknown action" };
 }
 
+function QuickBooksItemSelectOptions({
+  items,
+  selectedId,
+}: {
+  items: Array<{ quickbooksId: string; name: string }>;
+  selectedId?: string | null;
+}) {
+  const missingSelected =
+    selectedId && !items.some((item) => item.quickbooksId === selectedId);
+
+  return (
+    <>
+      <option value="">Select…</option>
+      {missingSelected ? (
+        <option value={selectedId}>
+          Unknown item (Id {selectedId})
+        </option>
+      ) : null}
+      {items.map((item) => (
+        <option key={item.quickbooksId} value={item.quickbooksId}>
+          {item.name} (Id {item.quickbooksId})
+        </option>
+      ))}
+    </>
+  );
+}
+
 export default function ProductsPage({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { products, stripeTransactionCountByProductId, qbConnected, taxCodes } =
-    loaderData;
+  const {
+    products,
+    stripeTransactionCountByProductId,
+    qbConnected,
+    qbItemsConnected,
+    taxCodes,
+    qbItems,
+  } = loaderData;
   const [toast, setToast] = useState<string | null>(null);
+
+  function quickBooksItemsSyncNote(
+    sync: { total: number } | null | undefined,
+  ): string {
+    if (!sync) return "";
+    return ` QuickBooks items refreshed (${sync.total} total).`;
+  }
 
   useEffect(() => {
     if (!actionData) return;
     if (actionData.scope === "create" && actionData.success) {
-      setToast("Product added.");
+      setToast(
+        `Product added.${quickBooksItemsSyncNote(actionData.qbItemsSync)}`,
+      );
       return;
     }
     if (actionData.scope === "update" && actionData.success) {
       const label = actionData.code?.trim();
-      setToast(label ? `${label} saved.` : "Product saved.");
+      setToast(
+        `${label ? `${label} saved.` : "Product saved."}${quickBooksItemsSyncNote(actionData.qbItemsSync)}`,
+      );
       return;
     }
     if (actionData.scope === "delete" && actionData.success) {
@@ -186,6 +260,24 @@ export default function ProductsPage({
             under QuickBooks.
           </p>
         )}
+        {qbItemsConnected && qbItems.length === 0 && (
+          <p className="mt-2 text-xs text-maroon">
+            No QuickBooks items available yet.{" "}
+            <Link
+              to="/integrations/quickbooks/items"
+              className="text-teal underline"
+            >
+              Refresh products &amp; services
+            </Link>{" "}
+            or add the product below — items sync automatically on save.
+          </p>
+        )}
+        {qbItemsConnected && qbItems.length > 0 && (
+          <p className="mt-2 text-xs text-ink-muted">
+            QuickBooks items are synced automatically when you add or save a
+            product.
+          </p>
+        )}
         <Form method="post" className="mt-3 flex flex-wrap items-end gap-3">
           <input type="hidden" name="intent" value="create" />
           <label className="flex flex-col gap-0.5 text-xs">
@@ -206,13 +298,16 @@ export default function ProductsPage({
               className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
             />
           </label>
-          <label className="flex flex-col gap-0.5 text-xs min-w-[10rem]">
-            <span className="text-ink-muted">QuickBooks item ID</span>
-            <input
+          <label className="flex flex-col gap-0.5 text-xs min-w-[14rem]">
+            <span className="text-ink-muted">QuickBooks item</span>
+            <select
               name="quickbooksItemId"
-              placeholder="Optional"
-              className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm font-mono"
-            />
+              defaultValue=""
+              disabled={!qbItemsConnected}
+              className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm disabled:opacity-60"
+            >
+              <QuickBooksItemSelectOptions items={qbItems} />
+            </select>
           </label>
           <label className="flex flex-col gap-0.5 text-xs w-[5.5rem]">
             <span className="text-ink-muted">VAT %</span>
@@ -297,14 +392,19 @@ export default function ProductsPage({
                       />
                     </td>
                     <td className="px-3 py-2">
-                      <input
+                      <select
                         form={formId}
                         name="quickbooksItemId"
                         defaultValue={p.quickbooksItemId ?? ""}
-                        placeholder="QBO item id"
+                        disabled={!qbItemsConnected}
                         aria-label={`QuickBooks item for ${p.code}`}
-                        className="w-full min-w-[8rem] rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1 text-sm font-mono"
-                      />
+                        className="w-full min-w-[12rem] rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1 text-sm disabled:opacity-60"
+                      >
+                        <QuickBooksItemSelectOptions
+                          items={qbItems}
+                          selectedId={p.quickbooksItemId}
+                        />
+                      </select>
                     </td>
                     <td className="px-3 py-2">
                       <input

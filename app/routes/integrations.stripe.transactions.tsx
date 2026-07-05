@@ -1,5 +1,5 @@
-import { Fragment } from "react";
-import { Form, Link, useLocation } from "react-router";
+import { Fragment, useMemo, useRef, useState, useEffect } from "react";
+import { Form, Link, redirect, useLocation } from "react-router";
 import type { Route } from "./+types/integrations.stripe.transactions";
 import { AppPage } from "~/components/app-page";
 import { QuickbooksPushBadge } from "~/components/quickbooks-push-badge";
@@ -7,6 +7,7 @@ import {
   StripeTransactionsFilterForm,
   StripeTransactionsFilterSummary,
 } from "~/components/stripe-transactions-filter-form";
+import { StripeTransactionsBulkAssignForm } from "~/components/stripe-transactions-bulk-assign-form";
 import { SubmitButton } from "~/components/submit-button";
 import { formatCalendarDateShort } from "~/lib/date-range-filters";
 import { formatMoneyMinor } from "~/lib/money";
@@ -18,7 +19,12 @@ import {
 } from "~/lib/stripe-balance-transactions.server";
 import { requireUser } from "~/lib/session.server";
 import { listStripeConnections } from "~/lib/stripe-connections.server";
-import { classifyAllStripeTransactions } from "~/lib/product-classification.server";
+import {
+  bulkSetStripeTransactionsProductManual,
+  classifyAllStripeTransactions,
+} from "~/lib/product-classification.server";
+import { canBulkAssignStripeTransactionProduct } from "~/lib/stripe-product-bulk-assign";
+import { listProducts } from "~/lib/products.server";
 import { getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
 import { pushStripeBalanceTransactionsBulkToQuickBooks } from "~/lib/stripe-quickbooks-push-execute.server";
 import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
@@ -193,22 +199,28 @@ export async function loader({ request }: Route.LoaderArgs) {
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
 
   const listOptions = toListStripeBalanceTransactionOptions(filters);
-  const txList = await listStripeBalanceTransactions({
-    ...listOptions,
-    page,
-    pageSize: STRIPE_TRANSACTIONS_PAGE_SIZE,
-  });
+  const [txList, catalogProducts] = await Promise.all([
+    listStripeBalanceTransactions({
+      ...listOptions,
+      page,
+      pageSize: STRIPE_TRANSACTIONS_PAGE_SIZE,
+    }),
+    listProducts({ activeOnly: true }),
+  ]);
 
   const connectionLabels = Object.fromEntries(
     connections.map((c) => [c.id, c.label]),
   );
   const qbConnected = Boolean(await getQuickBooksTokens());
+  const bulkAssigned = url.searchParams.get("bulkAssigned");
 
   return {
     connections,
     ...filters,
     connectionLabels,
     qbConnected,
+    catalogProducts,
+    bulkAssigned,
     ...txList,
   };
 }
@@ -249,6 +261,45 @@ export async function action({ request }: Route.ActionArgs) {
       return {
         scope: "sync" as const,
         error: err instanceof Error ? err.message : "Sync failed",
+      };
+    }
+  }
+
+  if (intent === "bulk-assign-product") {
+    const transactionIds = form
+      .getAll("transactionIds")
+      .map((value) => String(value));
+    const productId = String(form.get("productId") ?? "").trim();
+    if (!productId) {
+      return {
+        scope: "bulk-assign-product" as const,
+        error: "Choose a Lotus product",
+      };
+    }
+    if (transactionIds.length === 0) {
+      return {
+        scope: "bulk-assign-product" as const,
+        error: "Select at least one transaction",
+      };
+    }
+    try {
+      const result = await bulkSetStripeTransactionsProductManual(
+        transactionIds,
+        productId,
+        { triggeredBy: "app", userId: user.id },
+      );
+      const url = new URL(request.url);
+      const params = new URLSearchParams(url.searchParams);
+      params.set("bulkAssigned", String(result.updated));
+      if (result.skipped > 0) {
+        params.set("bulkSkipped", String(result.skipped));
+      }
+      const query = params.toString();
+      return redirect(query ? `${url.pathname}?${query}` : url.pathname);
+    } catch (err) {
+      return {
+        scope: "bulk-assign-product" as const,
+        error: err instanceof Error ? err.message : "Bulk assign failed",
       };
     }
   }
@@ -307,8 +358,64 @@ export default function StripeTransactionsPage({
     wcOrderSearch,
     wcLinked,
     qbConnected,
+    catalogProducts,
+    bulkAssigned,
   } = loaderData;
   const location = useLocation();
+  const url = new URL(`${location.pathname}${location.search}`, "http://local");
+  const bulkSkipped = url.searchParams.get("bulkSkipped");
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const selectAllRef = useRef<HTMLInputElement>(null);
+
+  const selectableTransactions = useMemo(
+    () => transactions.filter(canBulkAssignStripeTransactionProduct),
+    [transactions],
+  );
+  const selectableIds = useMemo(
+    () => selectableTransactions.map((tx) => tx.id),
+    [selectableTransactions],
+  );
+  const allSelectableOnPageSelected =
+    selectableIds.length > 0 &&
+    selectableIds.every((id) => selected.has(id));
+  const someSelectableOnPageSelected = selectableIds.some((id) =>
+    selected.has(id),
+  );
+  const selectedTransactionIds = useMemo(
+    () => selectableIds.filter((id) => selected.has(id)),
+    [selectableIds, selected],
+  );
+
+  useEffect(() => {
+    const input = selectAllRef.current;
+    if (!input) return;
+    input.indeterminate =
+      someSelectableOnPageSelected && !allSelectableOnPageSelected;
+  }, [someSelectableOnPageSelected, allSelectableOnPageSelected]);
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllSelectableOnPage() {
+    setSelected((prev) => {
+      const allSelected =
+        selectableIds.length > 0 &&
+        selectableIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const id of selectableIds) next.delete(id);
+      } else {
+        for (const id of selectableIds) next.add(id);
+      }
+      return next;
+    });
+  }
 
   const listFilters: StripeTransactionListFilters = {
     account,
@@ -336,8 +443,8 @@ export default function StripeTransactionsPage({
   }
   const returnTo = `${location.pathname}${location.search}`;
   const showAccountColumn = connections.length > 1;
-  const tableColumnCount = showAccountColumn ? 11 : 10;
-  const hintLeadingColSpan = showAccountColumn ? 2 : 1;
+  const tableColumnCount = showAccountColumn ? 12 : 11;
+  const hintLeadingColSpan = showAccountColumn ? 3 : 2;
   const hintContentColSpan = tableColumnCount - hintLeadingColSpan;
 
   const syncResult =
@@ -358,6 +465,10 @@ export default function StripeTransactionsPage({
       : null;
   const bulkPushError =
     actionData?.scope === "push-qb-bulk" && actionData.error
+      ? actionData.error
+      : null;
+  const bulkAssignError =
+    actionData?.scope === "bulk-assign-product" && actionData.error
       ? actionData.error
       : null;
 
@@ -527,6 +638,27 @@ export default function StripeTransactionsPage({
         </p>
       )}
 
+      {bulkAssignError && (
+        <p role="alert" className="mt-4 text-sm text-maroon">
+          {bulkAssignError}
+        </p>
+      )}
+
+      {bulkAssigned && (
+        <p role="status" className="mt-4 text-sm text-jade">
+          {(() => {
+            const count = Number(bulkAssigned);
+            const label = count === 1 ? "transaction" : "transactions";
+            const skipped = bulkSkipped ? Number(bulkSkipped) : 0;
+            const skippedNote =
+              skipped > 0
+                ? ` ${skipped} skipped (already matched or manual).`
+                : "";
+            return `Assigned Lotus product to ${count} ${label}.${skippedNote}`;
+          })()}
+        </p>
+      )}
+
       {bulkPushResult && (
         <div
           role="status"
@@ -672,9 +804,17 @@ export default function StripeTransactionsPage({
             </p>
           ) : (
             <>
+              <StripeTransactionsBulkAssignForm
+                selectedCount={selectedTransactionIds.length}
+                selectedTransactionIds={selectedTransactionIds}
+                catalogProducts={catalogProducts}
+                postAction={postAction}
+              />
+
               <div className="mt-3 min-w-0 rounded-jamyang border border-sand-dark/50">
                 <table className="w-full table-fixed text-left text-xs">
                   <colgroup>
+                    <col className="w-8" />
                     <col className="w-[4.25rem]" />
                     {showAccountColumn ? <col className="w-[5.5rem]" /> : null}
                     <col className="w-[18%]" />
@@ -689,6 +829,17 @@ export default function StripeTransactionsPage({
                   </colgroup>
                   <thead className="bg-surface text-dark">
                     <tr>
+                      <th className="px-1 py-1.5">
+                        <input
+                          ref={selectAllRef}
+                          type="checkbox"
+                          checked={allSelectableOnPageSelected}
+                          onChange={toggleAllSelectableOnPage}
+                          disabled={selectableIds.length === 0}
+                          aria-label="Select all unmatched on this page"
+                          className="rounded border-sand-dark/60"
+                        />
+                      </th>
                       <th className="px-1.5 py-1.5 font-medium">Date</th>
                       {showAccountColumn && (
                         <th className="px-1.5 py-1.5 font-medium">Account</th>
@@ -710,12 +861,25 @@ export default function StripeTransactionsPage({
                     {transactions.map((tx) => {
                       const hintFields = getStripeTextHintFields(tx);
                       const hasHints = hintFields.length > 0;
+                      const canSelect = canBulkAssignStripeTransactionProduct(tx);
+                      const isSelected = selected.has(tx.id);
 
                       return (
                         <Fragment key={tx.id}>
                           <tr
-                            className={`group align-top hover:bg-sand/20 ${hasHints ? "" : "border-b border-sand-dark/30"}`}
+                            className={`group align-top hover:bg-sand/20 ${hasHints ? "" : "border-b border-sand-dark/30"} ${isSelected ? "bg-teal/5 hover:bg-teal/10" : ""}`}
                           >
+                            <td className="px-1 py-1.5">
+                              {canSelect ? (
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleOne(tx.id)}
+                                  aria-label={`Select ${tx.stripeBalanceTransactionId}`}
+                                  className="rounded border-sand-dark/60"
+                                />
+                              ) : null}
+                            </td>
                             <td className="min-w-0 px-1.5 py-1.5 whitespace-nowrap text-ink-muted">
                               {formatCalendarDateShort(tx.stripeCreatedAt)}
                             </td>

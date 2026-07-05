@@ -129,6 +129,36 @@ For later invites with email, set `RESEND_API_KEY` and `RESEND_FROM` on Fly, the
 
 Register `https://lotus-ledger.fly.dev/integrations/quickbooks/callback` in the Intuit developer portal.
 
+## Scheduled integration sync (cron)
+
+Production runs a **sequential** sync on a schedule: **WooCommerce orders & products → Stripe balance transactions → push ready Stripe rows to QuickBooks → pull QuickBooks sales & refund receipts into Lotus**. Each step must finish before the next starts; a failure in WooCommerce, Stripe sync, or QuickBooks connection stops the run. Individual QuickBooks push failures are logged and do not stop the batch.
+
+| Step | What runs |
+|------|-----------|
+| 1 | WooCommerce orders (default last 30 days) + full product catalog |
+| 2 | Stripe balance transactions (classifies after upsert) |
+| 3 | Push unpushed Stripe transactions to QuickBooks (Sales / Refund Receipts) for rows in the sync window that are ready |
+| 4 | QuickBooks sales receipts + refund receipts (pull from QuickBooks into Lotus) |
+
+**Local / manual:**
+
+```powershell
+npm run sync:integrations-cron
+```
+
+Optional env: `CRON_WOO_SYNC_DAYS` / `WOO_SYNC_DAYS`, `CRON_STRIPE_SYNC_DAYS` / `STRIPE_SYNC_DAYS`, `CRON_QB_PUSH_DAYS` (defaults to the Stripe window).
+
+**Fly.io:** The Docker image includes [Supercronic](https://github.com/aptible/supercronic). Schedule is in `crontab` (default **02:00 UTC daily**). After first deploy with the cron process:
+
+```powershell
+fly deploy --app lotus-ledger
+fly scale count cron=1 app=1 --app lotus-ledger
+```
+
+Only **one** `cron` machine should run (Supercronic is not safe to scale horizontally). Logs: `fly logs --app lotus-ledger --process cron`.
+
+To change the schedule, edit `crontab` and redeploy.
+
 ## Local dev with Fly Postgres (optional)
 
 Proxy to the remote database:

@@ -24,6 +24,7 @@
     "sync:woocommerce-products": "npx tsx scripts/sync-woocommerce-products.ts",
     "clear:qb-sales-receipts": "npx tsx scripts/clear-quickbooks-sales-receipts.ts",
     "reimport:qb-sales-receipts": "npx tsx scripts/reimport-qb-sales-receipts.ts",
+    "sync:integrations-cron": "npx tsx scripts/sync-integrations-cron.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
@@ -38,7 +39,9 @@
     "react-dom": "^19.2.6",
     "react-router": "7.15.1",
     "resend": "^6.12.3",
-    "stripe": "^22.1.1"
+    "stripe": "^22.1.1",
+    "tsx": "^4.21.0",
+    "dotenv": "^17.4.2"
   },
   "devDependencies": {
     "@react-router/dev": "7.15.1",
@@ -47,7 +50,6 @@
     "@types/node": "^22",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
