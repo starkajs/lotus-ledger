@@ -9,6 +9,10 @@ import {
   type EmailChangeEmailParams,
 } from "./email-change-email.server";
 import { buildInviteEmailContent, type InviteEmailParams } from "./invite-email.server";
+import {
+  buildIntegrationsCronReportEmailContent,
+  type IntegrationsCronReportEmailParams,
+} from "./sync-integrations-cron-email.server";
 
 let client: Resend | null = null;
 
@@ -64,6 +68,34 @@ export async function sendEmailChangeEmail(
 ): Promise<{ id: string }> {
   const resend = getResendClient();
   const { subject, html, text } = buildEmailChangeEmailContent(params);
+
+  const { data, error } = await resend.emails.send({
+    from: getResendFromAddress(),
+    to: params.to,
+    subject,
+    html,
+    text,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data?.id) {
+    throw new Error("Resend did not return an email id");
+  }
+
+  return { id: data.id };
+}
+
+export async function sendIntegrationsCronReportEmail(
+  params: IntegrationsCronReportEmailParams & { to: string[] },
+): Promise<{ id: string }> {
+  if (params.to.length === 0) {
+    throw new Error("No cron report recipients configured");
+  }
+
+  const resend = getResendClient();
+  const { subject, html, text } = buildIntegrationsCronReportEmailContent(params);
 
   const { data, error } = await resend.emails.send({
     from: getResendFromAddress(),

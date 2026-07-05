@@ -146,7 +146,9 @@ Production runs a **sequential** sync on a schedule: **WooCommerce orders & prod
 npm run sync:integrations-cron
 ```
 
-Optional env: `CRON_WOO_SYNC_DAYS` / `WOO_SYNC_DAYS`, `CRON_STRIPE_SYNC_DAYS` / `STRIPE_SYNC_DAYS`, `CRON_QB_PUSH_DAYS` (defaults to the Stripe window).
+Optional env: `CRON_WOO_SYNC_DAYS` / `WOO_SYNC_DAYS`, `CRON_STRIPE_SYNC_DAYS` / `STRIPE_SYNC_DAYS`, `CRON_QB_PUSH_DAYS` (defaults to the Stripe window), `CRON_REPORT_TO` (comma-separated; defaults to `andrew@jamyang.co.uk` and `andrew.stark@aptim-solutions.com`).
+
+When `RESEND_API_KEY` and `RESEND_FROM` are set, a summary email is sent after each cron run (success or failure).
 
 **Fly.io:** The Docker image includes [Supercronic](https://github.com/aptible/supercronic). Schedule is in `crontab` (default **02:00 UTC daily**). After first deploy with the cron process:
 

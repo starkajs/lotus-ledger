@@ -34,6 +34,7 @@ COPY ./drizzle /app/drizzle
 COPY ./drizzle.config.ts /app/drizzle.config.ts
 COPY ./tsconfig.json /app/tsconfig.json
 COPY ./scripts/db-migrate.mjs ./scripts/check-drizzle-migrations.mjs ./scripts/sync-integrations-cron.ts /app/scripts/
+COPY ./scripts/lib/integrations-cron-notify.ts /app/scripts/lib/
 COPY ./crontab /app/crontab
 WORKDIR /app
 CMD ["npm", "run", "start"]
