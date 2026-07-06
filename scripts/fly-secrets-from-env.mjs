@@ -54,6 +54,16 @@ const ALLOWED_KEYS = new Set([
   "RESEND_FROM_EMAIL",
   "FROM_EMAIL",
   "resend_api_key",
+  "WC_SITE",
+  "WC_CONSUMER_KEY",
+  "WC_CONSUMER_SECRET",
+  "WC_STORE_CURRENCY",
+  "WOO_SYNC_DAYS",
+  "STRIPE_SYNC_DAYS",
+  "CRON_WOO_SYNC_DAYS",
+  "CRON_STRIPE_SYNC_DAYS",
+  "CRON_QB_PUSH_DAYS",
+  "CRON_REPORT_TO",
 ]);
 
 function normalizeAppUrl(raw, appName) {

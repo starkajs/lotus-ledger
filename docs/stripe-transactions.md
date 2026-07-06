@@ -60,7 +60,7 @@ npm run sync:stripe-transactions -- --days 30
 npm run sync:stripe-transactions -- --since 2024-01-01
 ```
 
-Or set `STRIPE_SYNC_DAYS` / `STRIPE_SYNC_SINCE` in `.env` for CLI runs without flags (omit both for all available history).
+Or set `STRIPE_SYNC_DAYS` / `STRIPE_SYNC_SINCE` in `.env` for CLI runs without flags (default window: 90 days when both are omitted).
 
 ### Clear all (re-import)
 

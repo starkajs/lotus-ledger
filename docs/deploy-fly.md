@@ -146,7 +146,15 @@ Production runs a **sequential** sync on a schedule: **WooCommerce orders & prod
 npm run sync:integrations-cron
 ```
 
-Optional env: `CRON_WOO_SYNC_DAYS` / `WOO_SYNC_DAYS`, `CRON_STRIPE_SYNC_DAYS` / `STRIPE_SYNC_DAYS`, `CRON_QB_PUSH_DAYS` (defaults to the Stripe window), `CRON_REPORT_TO` (comma-separated; defaults to `andrew@jamyang.co.uk` and `andrew.stark@aptim-solutions.com`).
+Optional env: `CRON_WOO_SYNC_DAYS` / `WOO_SYNC_DAYS`, `CRON_STRIPE_SYNC_DAYS` / `STRIPE_SYNC_DAYS`, `CRON_QB_PUSH_DAYS` (defaults to the Stripe window), `CRON_REPORT_TO` (comma-separated; defaults to `andrew@jamyang.co.uk` and `andrew.stark@aptim-solutions.com`). Automated windows are capped at **90 days** in code.
+
+On Fly, set explicit cron windows (recommended):
+
+```powershell
+fly secrets set CRON_WOO_SYNC_DAYS=30 CRON_STRIPE_SYNC_DAYS=30 CRON_QB_PUSH_DAYS=30 --app lotus-ledger
+```
+
+WooCommerce (`WC_SITE`, `WC_CONSUMER_KEY`, `WC_CONSUMER_SECRET`) and optional cron vars can be included when running `npm run fly:secrets:set` if they are in `.env`.
 
 When `RESEND_API_KEY` and `RESEND_FROM` are set, a summary email is sent after each cron run (success or failure).
 
@@ -160,6 +168,14 @@ fly scale count cron=1 app=1 --app lotus-ledger
 ```
 
 Only **one** `cron` machine should run (Supercronic is not safe to scale horizontally). Logs: `fly logs --app lotus-ledger --process cron`.
+
+**Manual run on Fly** (same script as the schedule; `WORKDIR` is already `/app`):
+
+```powershell
+fly ssh console --app lotus-ledger --process-group cron -C "npm run sync:integrations-cron"
+```
+
+`fly ssh console -C` runs the command directly (no shell), so do not use `cd … && …`. To use shell syntax: `-C "sh -c 'cd /app && npm run sync:integrations-cron'"`.
 
 To change the schedule, edit `crontab` and redeploy.
 

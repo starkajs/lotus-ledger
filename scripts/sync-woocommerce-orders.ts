@@ -70,8 +70,12 @@ try {
   console.log("\nDone.");
   console.log(`  Created:          ${result.created}`);
   console.log(`  Updated:          ${result.updated}`);
+  console.log(`  Processed:        ${result.processed}`);
   console.log(`  Linked to member: ${result.membersLinked}`);
   console.log(`  No billing email: ${result.skippedNoEmail}`);
+  if (result.wooCommerceTotalInScope != null) {
+    console.log(`  In scope (WC API): ${result.wooCommerceTotalInScope}`);
+  }
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);

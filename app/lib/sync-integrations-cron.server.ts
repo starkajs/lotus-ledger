@@ -23,7 +23,14 @@ import {
   syncStripeBalanceTransactions,
   type SyncStripeTransactionsResult,
 } from "~/lib/sync-stripe-transactions.server";
-import { WOOCOMMERCE_ORDER_APP_SYNC_DAYS } from "~/lib/woocommerce-orders.constants";
+import {
+  STRIPE_APP_SYNC_DAYS,
+  STRIPE_SYNC_DAYS_MAX,
+} from "~/lib/stripe-sync.constants";
+import {
+  WOOCOMMERCE_ORDER_APP_SYNC_DAYS,
+  WOOCOMMERCE_ORDER_SYNC_DAYS_MAX,
+} from "~/lib/woocommerce-orders.constants";
 import { requireWooCommerceConfig } from "~/lib/env.server";
 import {
   syncWooCommerceOrders,
@@ -58,18 +65,32 @@ export type SyncIntegrationsCronResult = {
 
 function resolveWooDays(options: SyncIntegrationsCronOptions): number {
   const fromEnv = Number(process.env.CRON_WOO_SYNC_DAYS ?? process.env.WOO_SYNC_DAYS ?? "");
-  if (Number.isFinite(fromEnv) && fromEnv > 0) {
-    return Math.floor(fromEnv);
+  let days =
+    Number.isFinite(fromEnv) && fromEnv > 0
+      ? Math.floor(fromEnv)
+      : options.wooDays ?? WOOCOMMERCE_ORDER_APP_SYNC_DAYS;
+  if (days > WOOCOMMERCE_ORDER_SYNC_DAYS_MAX) {
+    console.warn(
+      `  WooCommerce sync days capped at ${WOOCOMMERCE_ORDER_SYNC_DAYS_MAX} (was ${days})`,
+    );
+    days = WOOCOMMERCE_ORDER_SYNC_DAYS_MAX;
   }
-  return options.wooDays ?? WOOCOMMERCE_ORDER_APP_SYNC_DAYS;
+  return days;
 }
 
 function resolveStripeDays(options: SyncIntegrationsCronOptions): number {
   const fromEnv = Number(process.env.CRON_STRIPE_SYNC_DAYS ?? process.env.STRIPE_SYNC_DAYS ?? "");
-  if (Number.isFinite(fromEnv) && fromEnv > 0) {
-    return Math.floor(fromEnv);
+  let days =
+    Number.isFinite(fromEnv) && fromEnv > 0
+      ? Math.floor(fromEnv)
+      : options.stripeDays ?? STRIPE_APP_SYNC_DAYS;
+  if (days > STRIPE_SYNC_DAYS_MAX) {
+    console.warn(
+      `  Stripe sync days capped at ${STRIPE_SYNC_DAYS_MAX} (was ${days})`,
+    );
+    days = STRIPE_SYNC_DAYS_MAX;
   }
-  return options.stripeDays ?? 30;
+  return days;
 }
 
 function resolveQbPushDays(
@@ -77,10 +98,17 @@ function resolveQbPushDays(
   stripeDays: number,
 ): number {
   const fromEnv = Number(process.env.CRON_QB_PUSH_DAYS ?? "");
-  if (Number.isFinite(fromEnv) && fromEnv > 0) {
-    return Math.floor(fromEnv);
+  let days =
+    Number.isFinite(fromEnv) && fromEnv > 0
+      ? Math.floor(fromEnv)
+      : options.qbPushDays ?? stripeDays;
+  if (days > STRIPE_SYNC_DAYS_MAX) {
+    console.warn(
+      `  QuickBooks push days capped at ${STRIPE_SYNC_DAYS_MAX} (was ${days})`,
+    );
+    days = STRIPE_SYNC_DAYS_MAX;
   }
-  return options.qbPushDays ?? stripeDays;
+  return days;
 }
 
 function calendarDateDaysAgo(days: number): string {
@@ -99,12 +127,16 @@ async function syncIntegrationsCronInner(
 
   requireWooCommerceConfig();
 
+  console.log(`  WooCommerce order sync window: last ${wooDays} day(s)`);
+
   const orders = await syncWooCommerceOrders({
     days: wooDays,
     audit,
   });
 
   const products = await syncWooCommerceProductsFromApi({ audit });
+
+  console.log(`  Stripe balance transaction sync window: last ${stripeDays} day(s)`);
 
   const stripe = await syncStripeBalanceTransactions({
     days: stripeDays,

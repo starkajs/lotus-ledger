@@ -7,10 +7,11 @@
  *   npm run sync:stripe-transactions -- --days 30
  *   npm run sync:stripe-transactions -- --since 2024-01-01
  *
- * Optional env: STRIPE_SYNC_DAYS=30, STRIPE_SYNC_SINCE=2024-01-01 (used when flags omitted)
+ * Optional env: STRIPE_SYNC_DAYS=90, STRIPE_SYNC_SINCE=2024-01-01 (used when flags omitted)
  */
 import "dotenv/config";
 import { closeDb } from "../app/db/index";
+import { STRIPE_SYNC_DAYS } from "../app/lib/stripe-sync.constants";
 import {
   parseSyncSinceDate,
   syncStripeBalanceTransactions,
@@ -25,11 +26,6 @@ const daysFlag = args.indexOf("--days");
 const daysFromArg =
   daysFlag >= 0 ? Number(args[daysFlag + 1]) : Number.NaN;
 const daysFromEnv = Number(process.env.STRIPE_SYNC_DAYS ?? "");
-const days = Number.isFinite(daysFromArg) && daysFromArg > 0
-  ? Math.floor(daysFromArg)
-  : Number.isFinite(daysFromEnv) && daysFromEnv > 0
-    ? Math.floor(daysFromEnv)
-    : undefined;
 
 const sinceFlag = args.indexOf("--since");
 const sinceRaw =
@@ -46,6 +42,14 @@ if (sinceRaw) {
     process.exit(1);
   }
 }
+
+const days = Number.isFinite(daysFromArg) && daysFromArg > 0
+  ? Math.floor(daysFromArg)
+  : Number.isFinite(daysFromEnv) && daysFromEnv > 0
+    ? Math.floor(daysFromEnv)
+    : since
+      ? undefined
+      : STRIPE_SYNC_DAYS;
 
 if (connectionFlag >= 0 && !connectionId) {
   console.error(
@@ -77,16 +81,15 @@ try {
   }
   if (since) {
     console.log(`Date range: from ${sinceRaw} (UTC) onward`);
-  } else if (days) {
-    console.log(`Date range: last ${days} day(s) only`);
   } else {
-    console.log("Date range: all available history");
+    console.log(`Date range: last ${days} day(s)`);
   }
 
   const result = await syncStripeBalanceTransactions({ connectionId, days, since });
 
   console.log("\nDone.");
   console.log(`  Connections processed: ${result.connectionsProcessed}`);
+  console.log(`  Processed:             ${result.processed}`);
   console.log(`  Created:               ${result.created}`);
   console.log(`  Updated:               ${result.updated}`);
   console.log(`  Skipped (not posted):  ${result.skippedNotPosted}`);

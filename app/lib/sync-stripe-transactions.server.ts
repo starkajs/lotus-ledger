@@ -20,6 +20,7 @@ import {
   mapStripeBalanceTransaction,
   upsertStripeBalanceTransaction,
 } from "./stripe-balance-transactions.server";
+import { STRIPE_APP_SYNC_DAYS } from "./stripe-sync.constants";
 
 export type SyncStripeTransactionsOptions = {
   connectionId?: string;
@@ -34,12 +35,14 @@ export type SyncStripeTransactionsResult = {
   connectionsProcessed: number;
   created: number;
   updated: number;
+  processed: number;
   skippedNotPosted: number;
   membersLinked: number;
   classified: number;
   classificationSkippedManual: number;
   daysLimit?: number;
   since?: string;
+  createdGte?: string;
   stoppedAtCutoff: boolean;
 };
 
@@ -70,13 +73,6 @@ export function parseSyncSinceDate(value: string): Date {
     throw new Error(`Invalid --since date "${value}"`);
   }
   return date;
-}
-
-function resolveCreatedGte(
-  options: Pick<SyncStripeTransactionsOptions, "days" | "since">,
-): Date | undefined {
-  if (options.since) return options.since;
-  return createdSinceFromDays(options.days);
 }
 
 async function* iterateBalanceTransactions(
@@ -112,17 +108,38 @@ async function syncStripeBalanceTransactionsInner(
   jobId: string,
 ): Promise<SyncStripeTransactionsResult> {
   const audit = options.audit ?? { triggeredBy: "cli" as const };
-  const createdGte = resolveCreatedGte(options);
+  const daysLimit =
+    options.since != null
+      ? undefined
+      : options.days && options.days > 0
+        ? Math.floor(options.days)
+        : STRIPE_APP_SYNC_DAYS;
+
+  const createdGte =
+    options.since ?? createdSinceFromDays(daysLimit ?? STRIPE_APP_SYNC_DAYS);
+
+  if (!createdGte) {
+    throw new Error(
+      "Stripe balance transaction sync requires a date window — refusing to import full history",
+    );
+  }
+
+  console.log(
+    `  Stripe window: ${options.since ? `since ${options.since.toISOString()}` : `last ${daysLimit} day(s)`}; created>=${createdGte.toISOString()}`,
+  );
+
   const totals: SyncStripeTransactionsResult = {
     connectionsProcessed: 0,
     created: 0,
     updated: 0,
+    processed: 0,
     skippedNotPosted: 0,
     membersLinked: 0,
     classified: 0,
     classificationSkippedManual: 0,
-    daysLimit: options.since ? undefined : createdGte ? options.days : undefined,
+    daysLimit,
     since: options.since?.toISOString(),
+    createdGte: createdGte.toISOString(),
     stoppedAtCutoff: false,
   };
 
@@ -147,13 +164,11 @@ async function syncStripeBalanceTransactionsInner(
   for (const connectionId of connectionIds) {
     totals.connectionsProcessed += 1;
     const stripe = await getStripeClientForConnection(connectionId);
-    let connectionProcessed = 0;
-
     for await (const tx of iterateBalanceTransactions(stripe, createdGte)) {
-      connectionProcessed += 1;
-      if (connectionProcessed % 100 === 0) {
+      totals.processed += 1;
+      if (totals.processed % 100 === 0) {
         console.log(
-          `  … ${connectionProcessed} Stripe txns processed (connection ${totals.connectionsProcessed}/${connectionIds.length})`,
+          `  … ${totals.processed} Stripe txns processed (connection ${totals.connectionsProcessed}/${connectionIds.length})`,
         );
       }
       if (!isPostedStripeBalanceTransaction(tx)) {

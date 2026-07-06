@@ -122,9 +122,13 @@ ${params.error}
     `${headline} at ${finishedLabel}`,
     "",
     "WooCommerce orders",
+    `  Processed: ${wooOrders.processed}`,
     `  Created: ${wooOrders.created}`,
     `  Updated: ${wooOrders.updated}`,
     `  Linked to member: ${wooOrders.membersLinked}`,
+    wooOrders.wooCommerceTotalInScope != null
+      ? `  In scope (WC API): ${wooOrders.wooCommerceTotalInScope}`
+      : null,
     wooOrders.daysLimit ? `  Days window: ${wooOrders.daysLimit}` : null,
     "",
     "WooCommerce products",
@@ -133,10 +137,13 @@ ${params.error}
     "",
     "Stripe balance transactions",
     `  Connections: ${stripe.connectionsProcessed}`,
+    `  Processed: ${stripe.processed}`,
     `  Created: ${stripe.created}`,
     `  Updated: ${stripe.updated}`,
+    `  Skipped (not posted): ${stripe.skippedNotPosted}`,
     `  Classified: ${stripe.classified}`,
     `  Skipped (manual): ${stripe.classificationSkippedManual}`,
+    stripe.daysLimit ? `  Days window: ${stripe.daysLimit}` : null,
     "",
     "Stripe → QuickBooks push",
     `  Eligible in window: ${push.matchedFilter}`,
@@ -170,9 +177,13 @@ ${params.error}
   ${section(
     "WooCommerce orders",
     [
+      row("Processed", wooOrders.processed),
       row("Created", wooOrders.created),
       row("Updated", wooOrders.updated),
       row("Linked to member", wooOrders.membersLinked),
+      wooOrders.wooCommerceTotalInScope != null
+        ? row("In scope (WC API)", wooOrders.wooCommerceTotalInScope)
+        : "",
       wooOrders.daysLimit ? row("Days window", wooOrders.daysLimit) : "",
     ].join(""),
   )}
@@ -184,10 +195,13 @@ ${params.error}
     "Stripe balance transactions",
     [
       row("Connections", stripe.connectionsProcessed),
+      row("Processed", stripe.processed),
       row("Created", stripe.created),
       row("Updated", stripe.updated),
+      row("Skipped (not posted)", stripe.skippedNotPosted),
       row("Classified", stripe.classified),
       row("Skipped (manual)", stripe.classificationSkippedManual),
+      stripe.daysLimit ? row("Days window", stripe.daysLimit) : "",
     ].join(""),
   )}
   ${section(

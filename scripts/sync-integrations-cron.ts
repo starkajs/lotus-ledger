@@ -17,9 +17,15 @@ import { notifyIntegrationsCronReport } from "./lib/integrations-cron-notify";
 
 function logCronReport(result: Awaited<ReturnType<typeof runSyncIntegrationsCron>>) {
   console.log("\nWooCommerce orders");
+  console.log(`  Processed:        ${result.woocommerce.orders.processed}`);
   console.log(`  Created:          ${result.woocommerce.orders.created}`);
   console.log(`  Updated:          ${result.woocommerce.orders.updated}`);
   console.log(`  Linked to member: ${result.woocommerce.orders.membersLinked}`);
+  if (result.woocommerce.orders.wooCommerceTotalInScope != null) {
+    console.log(
+      `  In scope (WC API): ${result.woocommerce.orders.wooCommerceTotalInScope}`,
+    );
+  }
   if (result.woocommerce.orders.daysLimit) {
     console.log(`  Days window:      ${result.woocommerce.orders.daysLimit}`);
   }
@@ -29,11 +35,16 @@ function logCronReport(result: Awaited<ReturnType<typeof runSyncIntegrationsCron
   console.log(`  Updated: ${result.woocommerce.products.updated}`);
 
   console.log("\nStripe balance transactions");
-  console.log(`  Connections:       ${result.stripe.connectionsProcessed}`);
-  console.log(`  Created:           ${result.stripe.created}`);
-  console.log(`  Updated:           ${result.stripe.updated}`);
-  console.log(`  Classified:        ${result.stripe.classified}`);
-  console.log(`  Skipped (manual):  ${result.stripe.classificationSkippedManual}`);
+  console.log(`  Connections:          ${result.stripe.connectionsProcessed}`);
+  console.log(`  Processed:            ${result.stripe.processed}`);
+  console.log(`  Created:              ${result.stripe.created}`);
+  console.log(`  Updated:              ${result.stripe.updated}`);
+  console.log(`  Skipped (not posted): ${result.stripe.skippedNotPosted}`);
+  console.log(`  Classified:           ${result.stripe.classified}`);
+  console.log(`  Skipped (manual):     ${result.stripe.classificationSkippedManual}`);
+  if (result.stripe.daysLimit) {
+    console.log(`  Days window:          ${result.stripe.daysLimit}`);
+  }
 
   console.log("\nStripe → QuickBooks push");
   console.log(`  Eligible in window: ${result.quickbooks.stripePush.matchedFilter}`);
