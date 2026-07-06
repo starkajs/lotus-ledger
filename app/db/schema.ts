@@ -235,7 +235,7 @@ export const quickbooksConnections = pgTable("quickbooks_connections", {
   tokenType: text("token_type"),
   expiresIn: integer("expires_in"),
   refreshTokenExpiresIn: integer("refresh_token_expires_in"),
-  /** OAuth access token issued-at (ms since epoch) for refresh/expiry checks. */
+  /** OAuth access token issued-at (Unix seconds) for refresh/expiry checks. */
   tokenCreatedAt: integer("token_created_at"),
   livemode: boolean().notNull().default(false),
   companyName: text("company_name"),

@@ -1,6 +1,6 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { desc, eq } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { getDb } from "~/db";
 import { quickbooksConnections } from "~/db/schema";
 import { decryptSecret, encryptSecret } from "./encryption.server";
@@ -44,6 +44,23 @@ async function removeLegacyTokenFile(): Promise<void> {
   }
 }
 
+function tokenCreatedAtToStore(
+  createdAt: number | undefined,
+  fallback: Date,
+): number {
+  const ms = createdAt ?? fallback.getTime();
+  return Math.floor(ms / 1000);
+}
+
+function tokenCreatedAtFromStore(
+  stored: number | null,
+  fallback: Date,
+): number {
+  if (stored == null) return fallback.getTime();
+  // Values saved before the seconds fix may be ms and overflow int32 on write.
+  return stored > 2_147_483_647 ? stored : stored * 1000;
+}
+
 function rowToTokenStore(
   row: typeof quickbooksConnections.$inferSelect,
 ): QuickBooksTokenStore {
@@ -54,7 +71,7 @@ function rowToTokenStore(
     token_type: row.tokenType ?? undefined,
     expires_in: row.expiresIn ?? undefined,
     x_refresh_token_expires_in: row.refreshTokenExpiresIn ?? undefined,
-    createdAt: row.tokenCreatedAt ?? row.updatedAt.getTime(),
+    createdAt: tokenCreatedAtFromStore(row.tokenCreatedAt, row.updatedAt),
     companyName: row.companyName ?? undefined,
   };
 }
@@ -86,7 +103,7 @@ async function saveTokensToDatabase(tokens: QuickBooksTokenStore): Promise<void>
     tokenType: tokens.token_type ?? null,
     expiresIn: tokens.expires_in ?? null,
     refreshTokenExpiresIn: tokens.x_refresh_token_expires_in ?? null,
-    tokenCreatedAt: tokens.createdAt ?? now.getTime(),
+    tokenCreatedAt: tokenCreatedAtToStore(tokens.createdAt, now),
     livemode: getQuickBooksEnvironment() === "production",
     companyName: tokens.companyName ?? null,
     updatedAt: now,
