@@ -60,7 +60,7 @@ npm run dev
 3. Sign in with the Intuit account that owns Jamyang’s QBO company
 4. Approve access
 
-Tokens are saved to `.data/quickbooks-tokens.json` (gitignored). The page should show company name and recent invoices.
+Tokens are saved encrypted in the database (`quickbooks_connections`). The page should show company name and recent invoices.
 
 ## 4. API
 

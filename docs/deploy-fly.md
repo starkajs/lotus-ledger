@@ -150,6 +150,8 @@ Optional env: `CRON_WOO_SYNC_DAYS` / `WOO_SYNC_DAYS`, `CRON_STRIPE_SYNC_DAYS` / 
 
 When `RESEND_API_KEY` and `RESEND_FROM` are set, a summary email is sent after each cron run (success or failure).
 
+QuickBooks OAuth tokens are stored encrypted in Postgres (`quickbooks_connections`), not on the app machine filesystem, so the **cron** process can use the same connection as the web app. After upgrading, open **Integrations → QuickBooks** once (or reconnect) to migrate any legacy on-disk tokens into the database.
+
 **Fly.io:** The Docker image includes [Supercronic](https://github.com/aptible/supercronic). Schedule is in `crontab` (default **02:00 UTC daily**). After first deploy with the cron process:
 
 ```powershell

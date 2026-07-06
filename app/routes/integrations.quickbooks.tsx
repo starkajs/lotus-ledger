@@ -227,9 +227,8 @@ APP_URL=http://localhost:5174`}
             </p>
             <p className="mt-2 text-sm text-ink-muted">
               You will sign in to Intuit and authorise read access to Jamyang&apos;s
-              QuickBooks company. Tokens are saved in{" "}
-              <code className="text-dark">.data/quickbooks-tokens.json</code>{" "}
-              (gitignored) until we move them to the database.
+              QuickBooks company. Tokens are saved encrypted in the database so
+              the web app and scheduled cron jobs share the same connection.
             </p>
           </div>
         )}
