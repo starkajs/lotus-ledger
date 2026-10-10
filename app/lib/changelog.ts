@@ -27,7 +27,7 @@ export const changelog: ChangelogEntry[] = [
     changes: [
       "The WooCommerce to Stripe reconciliation lists failed, pending, and cancelled orders separately, because those payments never became a Stripe charge.",
     ],
-    commit: "",
+    commit: "47cba127889301025e72e15b20e8818140d1b8b5",
     parent: "606ba91f447b7c334c2b874b3a92ab2a6438ebfc",
   },
   {
