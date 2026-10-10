@@ -28,7 +28,7 @@ export const changelog: ChangelogEntry[] = [
       "The Stripe page shows the saved account and recent stored transactions without waiting for Stripe to answer.",
       "Last sync is the time of the last transaction pull. Refresh all still contacts Stripe.",
     ],
-    commit: "",
+    commit: "4e142a5ee44e143982d23df0b2c5758ad7ca37a5",
     parent: "30cd4200c61f7c4ae492818c322c41085186c147",
   },
   {
