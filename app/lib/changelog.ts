@@ -28,7 +28,7 @@ export const changelog: ChangelogEntry[] = [
       "Stripe, WooCommerce orders, and QuickBooks receipts start from the first day a previous sync did not cover, back as far as 120 days.",
       "A refresh still uses the last 30 days once that history is continuous.",
     ],
-    commit: "",
+    commit: "7ecaba9605044a1f430b5511f6257bbaa6025b35",
     parent: "ddd604b7aba8a651e925d7c3d6dbfd291bcae0b1",
   },
   {
