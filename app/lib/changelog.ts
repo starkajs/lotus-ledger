@@ -29,7 +29,7 @@ export const changelog: ChangelogEntry[] = [
       "Administrators can update that description on a receipt that was already pushed. The update rewrites the existing receipt.",
       "Clearing the pushed flag now waits until QuickBooks reports that receipt is deleted. If the receipt is still there, Lotus keeps the link.",
     ],
-    commit: "",
+    commit: "825960c406f8a4f20e8439ff781ef2ce98127991",
     parent: "59c6eb9c26114094287e087206c33b0f7b990a38",
   },
   {
