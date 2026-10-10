@@ -27,7 +27,7 @@ export const changelog: ChangelogEntry[] = [
     changes: [
       "Each group on the WooCommerce to Stripe and Stripe to QuickBooks reconciliations can be opened or closed. The totals stay visible, and the transaction list starts closed.",
     ],
-    commit: "",
+    commit: "f3613611d475ae49219db2af6e21498d1648938d",
     parent: "76b61254037b40c2e9f7d525e868ccacdbd98251",
   },
   {
