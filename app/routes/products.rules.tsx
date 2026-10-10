@@ -6,8 +6,8 @@ import {
   collectClassificationText,
   evaluateProductMatch,
   listActiveProductMatchRules,
-  productRulePatternError,
 } from "~/lib/product-classification.server";
+import { productRulePatternError } from "~/lib/product-rule-pattern";
 import {
   createProductMatchRule,
   deleteProductMatchRule,
