@@ -28,7 +28,7 @@ export const changelog: ChangelogEntry[] = [
       "QuickBooks has a Refresh all button. One press pulls accounts, classes, VAT codes, products and services, payment methods, and the last 30 days of sales and refund receipts.",
       "A list that fails is reported on the page, and the other lists still refresh. Each list is still recorded in job history.",
     ],
-    commit: "",
+    commit: "8ab67b838676ce632a238bc308d73371cbbff485",
     parent: "cc6edbbeb2f8889c866d32fbaa79c5debe47f168",
   },
   {
