@@ -410,7 +410,7 @@ function orderAmountMinorSql(major: number) {
   const zeroDecimal = Math.round(major);
   return sql`case when lower(${woocommerceOrders.currency}) in (
     'bif','clp','djf','gnf','jpy','kmf','krw','mga','pyg','rwf','ugx','vnd','vuv','xaf','xof','xpf'
-  ) then ${zeroDecimal} else ${twoDecimal} end`;
+  ) then ${zeroDecimal}::int else ${twoDecimal}::int end`;
 }
 
 const orderHasMappedLotusProduct = sql`exists (

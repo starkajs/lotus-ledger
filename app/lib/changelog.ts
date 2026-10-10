@@ -21,6 +21,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-wc-order-amount-cast",
+    shipped: "2026-10-10",
+    title: "WooCommerce amount filter",
+    changes: [
+      "Filtering WooCommerce orders by amount compares the total as a number, so the page loads.",
+    ],
+    commit: "",
+    parent: "ee27f317e10ad1be5d3b909dff91fb4b5c57ab91",
+  },
+  {
     id: "2026-10-10-wc-order-filters",
     shipped: "2026-10-10",
     title: "Filter WooCommerce orders by product and amount",
