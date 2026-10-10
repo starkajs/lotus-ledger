@@ -119,8 +119,7 @@ export default function WooCommerceIntegrationPage({
                 <h2 className="text-xl">WooCommerce data</h2>
                 <p className="mt-2 max-w-xl text-sm text-ink-muted">
                   Refresh all pulls orders and the product catalog. Orders
-                  cover the last 30 days, or from the newest order already
-                  stored when that is older.
+                  include any days missed since the last complete sync.
                 </p>
               </div>
               <Form method="post">

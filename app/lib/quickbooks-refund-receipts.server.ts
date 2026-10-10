@@ -13,6 +13,7 @@ import {
   type IntegrationAuditContext,
 } from "./integration-jobs.server";
 import { getQuickBooksTokens } from "./quickbooks-tokens.server";
+import { earliestUncoveredInstant } from "./sync-coverage.server";
 
 export const QUICKBOOKS_REFUND_RECEIPTS_PAGE_SIZE = 50;
 
@@ -153,12 +154,6 @@ function refundReceiptSyncSinceDate(
   const since = new Date();
   since.setUTCDate(since.getUTCDate() - Math.floor(days));
   return since.toISOString().slice(0, 10);
-}
-
-function isoDateOnly(value: Date | string | null | undefined): string | null {
-  if (!value) return null;
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  return value.slice(0, 10);
 }
 
 function daysCovered(sinceDate: string): number {
@@ -339,12 +334,11 @@ async function syncQuickBooksRefundReceiptsInner(options?: {
   const rollingSince = refundReceiptSyncSinceDate();
   let sinceDate = options?.sinceDate ?? rollingSince;
   if (!options?.sinceDate) {
-    const [newest] = await db
-      .select({ value: max(quickbooksRefundReceipts.txnDate) })
-      .from(quickbooksRefundReceipts)
-      .where(eq(quickbooksRefundReceipts.realmId, realmId));
-    const newestDate = isoDateOnly(newest?.value);
-    if (newestDate && newestDate < rollingSince) sinceDate = newestDate;
+    const uncovered = await earliestUncoveredInstant({
+      jobType: "quickbooks_refund_receipts_sync",
+    });
+    const gapDate = uncovered?.toISOString().slice(0, 10);
+    if (gapDate && gapDate < sinceDate) sinceDate = gapDate;
   }
   const daysLimit = daysCovered(sinceDate);
   const rows = await queryQuickBooksAll<QbRefundReceiptRow>(

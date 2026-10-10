@@ -112,7 +112,7 @@ export default function QuickBooksRefundReceiptsPage({
   return (
     <QuickBooksMasterDataPage
       title="Refund receipts"
-      description="Refresh loads the last 30 days from QuickBooks. If the newest receipt stored here is older than that, it starts there and catches up. Receipts deleted in QuickBooks are marked removed."
+      description="Refresh loads the last 30 days from QuickBooks, and any earlier days a previous sync did not cover. Receipts deleted in QuickBooks are marked removed."
       connected={loaderData.connected}
       companyName={loaderData.companyName}
       lastSyncedAt={loaderData.lastSyncedAt}

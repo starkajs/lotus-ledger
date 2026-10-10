@@ -21,6 +21,10 @@ import {
   upsertStripeBalanceTransaction,
 } from "./stripe-balance-transactions.server";
 import { STRIPE_APP_SYNC_DAYS } from "./stripe-sync.constants";
+import {
+  earliestUncoveredInstant,
+  expandSyncStart,
+} from "./sync-coverage.server";
 
 export type SyncStripeTransactionsOptions = {
   connectionId?: string;
@@ -115,33 +119,14 @@ async function syncStripeBalanceTransactionsInner(
         ? Math.floor(options.days)
         : STRIPE_APP_SYNC_DAYS;
 
-  const createdGte =
+  const requestedStart =
     options.since ?? createdSinceFromDays(daysLimit ?? STRIPE_APP_SYNC_DAYS);
 
-  if (!createdGte) {
+  if (!requestedStart) {
     throw new Error(
       "Stripe balance transaction sync requires a date window — refusing to import full history",
     );
   }
-
-  console.log(
-    `  Stripe window: ${options.since ? `since ${options.since.toISOString()}` : `last ${daysLimit} day(s)`}; created>=${createdGte.toISOString()}`,
-  );
-
-  const totals: SyncStripeTransactionsResult = {
-    connectionsProcessed: 0,
-    created: 0,
-    updated: 0,
-    processed: 0,
-    skippedNotPosted: 0,
-    membersLinked: 0,
-    classified: 0,
-    classificationSkippedManual: 0,
-    daysLimit,
-    since: options.since?.toISOString(),
-    createdGte: createdGte.toISOString(),
-    stoppedAtCutoff: false,
-  };
 
   const connectionIds: string[] = [];
 
@@ -160,6 +145,37 @@ async function syncStripeBalanceTransactionsInner(
     }
     connectionIds.push(...connections.map((c) => c.id));
   }
+
+  const uncovered = options.since
+    ? null
+    : await earliestUncoveredInstant({
+        jobType: "stripe_transactions_sync",
+        connectionIds,
+      });
+  const createdGte = expandSyncStart(requestedStart, uncovered);
+  const coveredDays = Math.max(
+    1,
+    Math.ceil((Date.now() - createdGte.getTime()) / (24 * 60 * 60 * 1000)),
+  );
+
+  console.log(
+    `  Stripe window: created>=${createdGte.toISOString()} (${coveredDays} day(s))`,
+  );
+
+  const totals: SyncStripeTransactionsResult = {
+    connectionsProcessed: 0,
+    created: 0,
+    updated: 0,
+    processed: 0,
+    skippedNotPosted: 0,
+    membersLinked: 0,
+    classified: 0,
+    classificationSkippedManual: 0,
+    daysLimit: coveredDays,
+    since: options.since?.toISOString(),
+    createdGte: createdGte.toISOString(),
+    stoppedAtCutoff: false,
+  };
 
   for (const connectionId of connectionIds) {
     totals.connectionsProcessed += 1;

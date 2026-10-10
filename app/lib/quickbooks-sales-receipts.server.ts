@@ -16,6 +16,7 @@ import {
   type IntegrationAuditContext,
 } from "./integration-jobs.server";
 import { getQuickBooksTokens } from "./quickbooks-tokens.server";
+import { earliestUncoveredInstant } from "./sync-coverage.server";
 
 export const QUICKBOOKS_SALES_RECEIPTS_PAGE_SIZE = 50;
 
@@ -154,12 +155,6 @@ function salesReceiptSyncSinceDate(days = QUICKBOOKS_SALES_RECEIPT_SYNC_DAYS): s
   const since = new Date();
   since.setUTCDate(since.getUTCDate() - Math.floor(days));
   return since.toISOString().slice(0, 10);
-}
-
-function isoDateOnly(value: Date | string | null | undefined): string | null {
-  if (!value) return null;
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  return value.slice(0, 10);
 }
 
 function daysCovered(sinceDate: string): number {
@@ -332,7 +327,7 @@ async function resolveRealmId(): Promise<string> {
 
 /**
  * Upsert sales receipts by (realm_id, quickbooks_id): update if exists, insert if new.
- * Fetches the last 30 days. If the newest stored receipt is older than that, starts there so a gap is filled.
+ * Fetches the last 30 days. If a completed sync left a hole, starts at that hole.
  */
 async function syncQuickBooksSalesReceiptsInner(options?: {
   sinceDate?: string;
@@ -342,12 +337,11 @@ async function syncQuickBooksSalesReceiptsInner(options?: {
   const rollingSince = salesReceiptSyncSinceDate();
   let sinceDate = options?.sinceDate ?? rollingSince;
   if (!options?.sinceDate) {
-    const [newest] = await db
-      .select({ value: max(quickbooksSalesReceipts.txnDate) })
-      .from(quickbooksSalesReceipts)
-      .where(eq(quickbooksSalesReceipts.realmId, realmId));
-    const newestDate = isoDateOnly(newest?.value);
-    if (newestDate && newestDate < rollingSince) sinceDate = newestDate;
+    const uncovered = await earliestUncoveredInstant({
+      jobType: "quickbooks_sales_receipts_sync",
+    });
+    const gapDate = uncovered?.toISOString().slice(0, 10);
+    if (gapDate && gapDate < sinceDate) sinceDate = gapDate;
   }
   const daysLimit = daysCovered(sinceDate);
   const rows = await queryQuickBooksAll<QbSalesReceiptRow>(

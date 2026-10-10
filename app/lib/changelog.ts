@@ -21,6 +21,17 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-sync-gaps",
+    shipped: "2026-10-10",
+    title: "Syncs fill days that were missed",
+    changes: [
+      "Stripe, WooCommerce orders, and QuickBooks receipts start from the first day a previous sync did not cover, back as far as 120 days.",
+      "A refresh still uses the last 30 days once that history is continuous.",
+    ],
+    commit: "",
+    parent: "ddd604b7aba8a651e925d7c3d6dbfd291bcae0b1",
+  },
+  {
     id: "2026-10-10-stripe-woo-refresh-all",
     shipped: "2026-10-10",
     title: "Refresh all for Stripe and WooCommerce",

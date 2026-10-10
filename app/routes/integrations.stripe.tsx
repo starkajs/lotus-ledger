@@ -271,8 +271,8 @@ export default function StripeIntegration({
                 <h2 className="text-xl">Stripe data</h2>
                 <p className="mt-2 max-w-xl text-sm text-ink-muted">
                   Refresh all pulls balance transactions for every saved
-                  account. The window is the last 30 days, or from the newest
-                  transaction already stored when that is older.
+                  account, including any days missed since the last complete
+                  sync.
                 </p>
               </div>
               <Form method="post">

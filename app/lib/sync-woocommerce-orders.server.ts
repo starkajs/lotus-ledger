@@ -5,6 +5,10 @@ import {
 } from "~/lib/integration-jobs.server";
 import { WOOCOMMERCE_ORDER_APP_SYNC_DAYS } from "~/lib/woocommerce-orders.constants";
 import {
+  earliestUncoveredInstant,
+  expandSyncStart,
+} from "~/lib/sync-coverage.server";
+import {
   linkWooCommerceOrderToMember,
   mapWooCommerceOrder,
   upsertWooCommerceOrder,
@@ -72,8 +76,20 @@ async function syncWooCommerceOrdersInner(
         ? Math.floor(options.days)
         : WOOCOMMERCE_ORDER_APP_SYNC_DAYS;
 
-  const createdGte =
+  const requestedStart =
     options.since ?? createdAfterFromDays(daysLimit ?? WOOCOMMERCE_ORDER_APP_SYNC_DAYS);
+  const uncovered = options.since
+    ? null
+    : await earliestUncoveredInstant({ jobType: "woocommerce_orders_sync" });
+  const createdGte = requestedStart
+    ? expandSyncStart(requestedStart, uncovered)
+    : null;
+  const coveredDays = createdGte
+    ? Math.max(
+        1,
+        Math.ceil((Date.now() - createdGte.getTime()) / (24 * 60 * 60 * 1000)),
+      )
+    : daysLimit;
   const after = createdGte ? toWooCommerceAfterParam(createdGte) : undefined;
 
   if (!after) {
@@ -92,7 +108,7 @@ async function syncWooCommerceOrdersInner(
     `  WooCommerce orders in scope: ${scopePreview.total} (${scopePreview.totalPages} API page(s))`,
   );
   console.log(
-    `  Window: ${options.since ? `since ${options.since.toISOString()}` : `last ${daysLimit} day(s)`}; after=${after}`,
+    `  Window: after=${after} (${coveredDays} day(s))`,
   );
 
   const totals: SyncWooCommerceOrdersResult = {
@@ -101,7 +117,7 @@ async function syncWooCommerceOrdersInner(
     processed: 0,
     membersLinked: 0,
     skippedNoEmail: 0,
-    daysLimit,
+    daysLimit: coveredDays,
     since: options.since?.toISOString(),
     after,
     wooCommerceTotalInScope: scopePreview.total,

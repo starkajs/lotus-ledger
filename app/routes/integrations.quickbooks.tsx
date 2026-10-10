@@ -333,8 +333,8 @@ APP_URL=http://localhost:5174`}
                     <p className="mt-2 max-w-xl text-sm text-ink-muted">
                       Refresh all pulls accounts, classes, VAT codes, products
                       and services, payment methods, and sales and refund
-                      receipts. Receipts cover the last 30 days, or from the
-                      newest receipt already stored when that is older.
+                      receipts. Receipts include any days missed since the last
+                      complete sync.
                     </p>
                   </div>
                   <Form method="post" action={postAction}>
