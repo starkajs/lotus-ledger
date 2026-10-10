@@ -15,6 +15,7 @@ import {
 } from "~/lib/quickbooks-api.server";
 import { clearQuickBooksTokens, getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
 import { getQuickBooksRedirectUri } from "~/lib/quickbooks-oauth.server";
+import { refreshAllQuickBooks } from "~/lib/quickbooks-refresh-all.server";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -103,7 +104,37 @@ export async function action({ request }: Route.ActionArgs) {
     await clearQuickBooksTokens();
     return redirect("/integrations/quickbooks");
   }
+  if (formData.get("intent") === "refresh-all") {
+    const tokens = await getQuickBooksTokens();
+    if (!tokens) {
+      return {
+        scope: "refresh-all" as const,
+        error: "QuickBooks is not connected.",
+      };
+    }
+    const steps = await refreshAllQuickBooks({
+      triggeredBy: "app",
+      userId: user.id,
+    });
+    return { scope: "refresh-all" as const, steps };
+  }
   return redirect("/integrations/quickbooks");
+}
+
+function describeRefreshStep(step: {
+  ok: boolean;
+  total: number | null;
+  created: number | null;
+  updated: number | null;
+  tombstoned: number | null;
+  error: string | null;
+}) {
+  if (!step.ok) return step.error ?? "Refresh failed";
+  const removed =
+    step.tombstoned && step.tombstoned > 0
+      ? `, ${step.tombstoned} marked removed`
+      : "";
+  return `${step.total} rows (${step.created} new, ${step.updated} updated${removed})`;
 }
 
 function formatMoney(amount: number, currency: string | null) {
@@ -115,6 +146,7 @@ function formatMoney(amount: number, currency: string | null) {
 
 export default function QuickBooksIntegration({
   loaderData,
+  actionData,
 }: Route.ComponentProps) {
   const [searchParams] = useSearchParams();
   const location = useLocation();
@@ -295,12 +327,46 @@ APP_URL=http://localhost:5174`}
 
             {connection?.ok && (
               <section className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-6">
-                <h2 className="text-xl">Master data</h2>
-                <p className="mt-2 text-sm text-ink-muted">
-                  Sync chart of accounts, classes, and products &amp; services from
-                  QuickBooks into Lotus Ledger. Refresh each list when mappings change
-                  in QuickBooks.
-                </p>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl">QuickBooks data</h2>
+                    <p className="mt-2 max-w-xl text-sm text-ink-muted">
+                      Refresh all pulls accounts, classes, VAT codes, products
+                      and services, payment methods, and the last 30 days of
+                      sales and refund receipts.
+                    </p>
+                  </div>
+                  <Form method="post" action={postAction}>
+                    <SubmitButton
+                      intent="refresh-all"
+                      variant="pill"
+                      loadingLabel="Refreshing all…"
+                    >
+                      Refresh all
+                    </SubmitButton>
+                  </Form>
+                </div>
+                {actionData?.scope === "refresh-all" && actionData.error ? (
+                  <p
+                    role="alert"
+                    className="mt-4 rounded-jamyang border border-maroon/30 bg-maroon/5 px-4 py-3 text-sm text-maroon"
+                  >
+                    {actionData.error}
+                  </p>
+                ) : null}
+                {actionData?.scope === "refresh-all" && actionData.steps ? (
+                  <ul
+                    role="status"
+                    className="mt-4 space-y-1 rounded-jamyang border border-sand-dark/40 bg-surface px-4 py-3 text-sm"
+                  >
+                    {actionData.steps.map((step) => (
+                      <li key={step.key} className={step.ok ? "text-dark" : "text-maroon"}>
+                        <span className="font-medium">{step.label}:</span>{" "}
+                        {describeRefreshStep(step)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
                 <ul className="mt-4 flex flex-wrap gap-3 text-sm">
                   <li>
                     <Link

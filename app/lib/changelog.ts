@@ -21,6 +21,17 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-quickbooks-refresh-all",
+    shipped: "2026-10-10",
+    title: "Refresh all QuickBooks data",
+    changes: [
+      "QuickBooks has a Refresh all button. One press pulls accounts, classes, VAT codes, products and services, payment methods, and the last 30 days of sales and refund receipts.",
+      "A list that fails is reported on the page, and the other lists still refresh. Each list is still recorded in job history.",
+    ],
+    commit: "",
+    parent: "cc6edbbeb2f8889c866d32fbaa79c5debe47f168",
+  },
+  {
     id: "2026-10-10-home-syncs",
     shipped: "2026-10-10",
     title: "Last syncs on Home",

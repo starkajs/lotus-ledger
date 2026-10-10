@@ -10,12 +10,14 @@ const LONG_RUNNING_INTENTS = new Set([
   "push",
   "push-qb-bulk",
   "clear-qb-push",
+  "refresh-all",
 ]);
 
 const INTENT_MESSAGES: Record<string, string> = {
   classify: "Classifying transactions…",
   reclassify: "Re-classifying transaction…",
   refresh: "Refreshing from QuickBooks…",
+  "refresh-all": "Refreshing all QuickBooks data…",
   push: "Pushing to QuickBooks…",
   "clear-qb-push": "Checking QuickBooks for the receipt…",
 };
