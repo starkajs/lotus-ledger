@@ -12,17 +12,19 @@ import {
   syncWooCommerceProductsFromApi,
 } from "~/lib/woocommerce-products.server";
 
-type LotusLinkFilter = "all" | "linked" | "unlinked";
+type LotusLinkFilter = "all" | "linked" | "unlinked" | "ordered-unlinked";
 
 function parseLotusLinkFilter(value: string | null): LotusLinkFilter {
   if (value === "yes") return "linked";
   if (value === "no") return "unlinked";
+  if (value === "ordered") return "ordered-unlinked";
   return "all";
 }
 
 function lotusLinkParam(filter: LotusLinkFilter): string | null {
   if (filter === "linked") return "yes";
   if (filter === "unlinked") return "no";
+  if (filter === "ordered-unlinked") return "ordered";
   return null;
 }
 
@@ -264,11 +266,12 @@ export default function WooCommerceProductsPage({
               <select
                 name="mapped"
                 defaultValue={lotusLinkParam(lotusLink) ?? ""}
-                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[10rem]"
+                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[14rem]"
               >
                 <option value="">All</option>
                 <option value="yes">Linked</option>
                 <option value="no">Not linked</option>
+                <option value="ordered">On an order, not linked</option>
               </select>
             </label>
             <button
@@ -285,13 +288,18 @@ export default function WooCommerceProductsPage({
                 ? "No products linked to a Lotus product."
                 : lotusLink === "unlinked"
                   ? "No unlinked products — everything has a Lotus product."
-                  : "No products synced yet."
+                  : lotusLink === "ordered-unlinked"
+                    ? "No ordered products are waiting for a Lotus product."
+                    : "No products synced yet."
               : `${total} product${total === 1 ? "" : "s"}`}
             {lotusLink === "linked" && total > 0 && (
               <span className="text-ink-faint"> · linked only</span>
             )}
             {lotusLink === "unlinked" && total > 0 && (
               <span className="text-ink-faint"> · not linked only</span>
+            )}
+            {lotusLink === "ordered-unlinked" && total > 0 && (
+              <span className="text-ink-faint"> · on an order, not linked</span>
             )}
             {total > 0 && (
               <span className="text-ink-faint">
@@ -307,7 +315,9 @@ export default function WooCommerceProductsPage({
                 ? "All products are linked, or try clearing filters."
                 : lotusLink === "linked"
                   ? "Clear the filter or link products on their detail pages."
-                  : "Use Sync from WooCommerce to import your catalog."}
+                  : lotusLink === "ordered-unlinked"
+                    ? "Every product that appears on an order already has a Lotus product."
+                    : "Use Sync from WooCommerce to import your catalog."}
             </p>
           ) : (
             <>

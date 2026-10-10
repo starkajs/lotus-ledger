@@ -21,6 +21,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-wc-ordered-unlinked",
+    shipped: "2026-10-10",
+    title: "WooCommerce products waiting to be mapped",
+    changes: [
+      "WooCommerce products can be filtered to those that appear on an order and still have no Lotus product.",
+    ],
+    commit: "",
+    parent: "f827ac8638f780b45b6b33e1bcb56a1fd9b3710e",
+  },
+  {
     id: "2026-10-10-stripe-page-load",
     shipped: "2026-10-10",
     title: "Stripe page loads from Lotus",

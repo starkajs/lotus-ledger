@@ -10,10 +10,12 @@ import {
   isNull,
   max,
   or,
+  sql,
 } from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   products,
+  woocommerceOrders,
   woocommerceProducts,
   type WooCommerceOrderLineItem,
 } from "~/db/schema";
@@ -210,7 +212,19 @@ export async function upsertWooCommerceProduct(
   return "created";
 }
 
-export type WooCommerceProductLotusLinkFilter = "all" | "linked" | "unlinked";
+export type WooCommerceProductLotusLinkFilter =
+  | "all"
+  | "linked"
+  | "unlinked"
+  | "ordered-unlinked";
+
+/** WC product id appears on at least one stored order line. */
+const productAppearsOnAnOrder = sql`exists (
+  select 1
+  from ${woocommerceOrders},
+  lateral jsonb_array_elements(coalesce(${woocommerceOrders.lineItems}, '[]'::jsonb)) as line(elem)
+  where coalesce((line.elem->>'productId')::int, 0) = ${woocommerceProducts.wcProductId}
+)`;
 
 export type ListWooCommerceProductsDbOptions = {
   q?: string;
@@ -261,7 +275,9 @@ export async function listWooCommerceProductsFromDb(
       ? isNotNull(woocommerceProducts.productId)
       : options.lotusLink === "unlinked"
         ? isNull(woocommerceProducts.productId)
-        : undefined;
+        : options.lotusLink === "ordered-unlinked"
+          ? and(isNull(woocommerceProducts.productId), productAppearsOnAnOrder)
+          : undefined;
 
   const filters = [search, statusFilter, lotusLinkFilter].filter(
     (f): f is NonNullable<typeof f> => f != null,
