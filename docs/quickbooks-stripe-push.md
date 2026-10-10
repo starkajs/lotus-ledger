@@ -26,7 +26,7 @@ Implemented in `app/lib/quickbooks-api-write.server.ts` as `createQuickBooksSale
 | `PaymentRefNum` | Stripe connection template (default `{{payment_intent_id}}`) |
 | `CustomerMemo` | **Community member email** (Stripe connection message template only if no member email) |
 | `BillEmail` | Same as member email when linked |
-| `Line[].Description` | Stripe transaction description (charge, else balance) |
+| `Line[].Description` | Lotus product, then Stripe description, line item, SKU, and WooCommerce order when those differ |
 | `TrackingNum` | `stripe_payment_intent_id` (`pi_…`) |
 | `TxnDate` | `stripe_created_at` (Europe/London calendar date) |
 | `Line[].SalesItemLineDetail.ItemRef` | Lotus **product** → `products.quickbooks_item_id` |
@@ -85,7 +85,7 @@ Reverse lookup: `getStripeBalanceTransactionByQuickBooksSalesReceiptId()` / `get
 
 On successful push, if the receipt is not yet in `quickbooks_sales_receipts`, Lotus imports it from the API response (`upsertQuickBooksSalesReceiptFromApi()`).
 
-**Clear pushed flag:** `clearStripeBalanceTransactionQuickBooksPush()` sets `pushed_to_quickbooks = false`, clears `quickbooks_pushed_at` and `quickbooks_sales_receipt_id` (does not delete the synced QB receipt row). Available on the transaction detail page and the push preview page.
+**Clear pushed flag:** `clearStripeTransactionQuickBooksPush()` reads the stored Sales Receipt or Refund Receipt from QuickBooks. The Lotus flag is cleared only when QuickBooks reports that receipt is deleted (fault 610). If the receipt is still there, or QuickBooks cannot be reached, the flag stays and a second receipt is not created. The local receipt row is marked deleted when the clear succeeds. Available on the transaction detail page and the push preview page.
 
 ## Related code
 

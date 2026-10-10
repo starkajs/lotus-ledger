@@ -997,7 +997,11 @@ export async function setStripeBalanceTransactionQuickBooksSalesReceipt(
     .where(eq(stripeBalanceTransactions.id, lotusTransactionId));
 }
 
-/** Clear pushed state so the transaction can be pushed to QuickBooks again. */
+/**
+ * Clear pushed state in Lotus. Callers that can create another QuickBooks
+ * receipt must confirm the existing receipt is deleted first
+ * (`clearStripeTransactionQuickBooksPush`).
+ */
 export async function clearStripeBalanceTransactionQuickBooksPush(
   lotusTransactionId: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {

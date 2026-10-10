@@ -1,6 +1,13 @@
+import { and, eq } from "drizzle-orm";
+import { getDb } from "~/db";
+import {
+  quickbooksRefundReceipts,
+  quickbooksSalesReceipts,
+} from "~/db/schema";
 import {
   createQuickBooksRefundReceiptDetailed,
   createQuickBooksSalesReceiptDetailed,
+  quickBooksReceiptPresence,
   type QuickBooksRefundReceiptCreateOutcome,
   type QuickBooksSalesReceiptCreateOutcome,
 } from "~/lib/quickbooks-api-write.server";
@@ -90,10 +97,93 @@ function stripeQuickBooksDocumentAlreadyPushed(
   return tx.quickbooksSalesReceiptId ?? tx.quickbooksRefundReceiptId ?? null;
 }
 
+async function tombstoneLocalQuickBooksReceipt(
+  entity: "salesreceipt" | "refundreceipt",
+  quickbooksId: string,
+): Promise<void> {
+  const tokens = await getQuickBooksTokens();
+  if (!tokens) return;
+  const now = new Date();
+  const table =
+    entity === "salesreceipt" ? quickbooksSalesReceipts : quickbooksRefundReceipts;
+  const db = getDb();
+  await db
+    .update(table)
+    .set({
+      qbStatus: "deleted_in_qb",
+      deletedInQbAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(eq(table.realmId, tokens.realmId), eq(table.quickbooksId, quickbooksId)),
+    );
+}
+
+/**
+ * Clear the Lotus push link only after QuickBooks reports each stored
+ * receipt is gone. A receipt that still exists blocks the clear, so a
+ * later push cannot create a second one by accident.
+ */
 export async function clearStripeTransactionQuickBooksPush(
   lotusTransactionId: string,
 ): Promise<ClearStripeQuickBooksPushResult> {
-  return clearStripeBalanceTransactionQuickBooksPush(lotusTransactionId);
+  const tx = await getStripeBalanceTransactionById(lotusTransactionId);
+  if (!tx) return { ok: false, reason: "Transaction not found" };
+
+  const receipts: Array<{
+    entity: "salesreceipt" | "refundreceipt";
+    id: string;
+    label: string;
+  }> = [];
+  if (tx.quickbooksSalesReceiptId) {
+    receipts.push({
+      entity: "salesreceipt",
+      id: tx.quickbooksSalesReceiptId,
+      label: "Sales Receipt",
+    });
+  }
+  if (tx.quickbooksRefundReceiptId) {
+    receipts.push({
+      entity: "refundreceipt",
+      id: tx.quickbooksRefundReceiptId,
+      label: "Refund Receipt",
+    });
+  }
+
+  if (receipts.length === 0) {
+    return {
+      ok: false,
+      reason: tx.pushedToQuickbooks
+        ? "Lotus has no QuickBooks receipt id, so it cannot confirm the receipt was deleted."
+        : "Transaction is not marked as pushed to QuickBooks",
+    };
+  }
+
+  for (const receipt of receipts) {
+    const presence = await quickBooksReceiptPresence(receipt);
+    if (presence.state === "present") {
+      return {
+        ok: false,
+        reason: `QuickBooks still has ${receipt.label} ${receipt.id}. Delete it in QuickBooks, then clear the flag.`,
+      };
+    }
+    if (presence.state === "unknown") {
+      return {
+        ok: false,
+        reason: `Could not confirm with QuickBooks that ${receipt.label} ${receipt.id} was deleted. ${presence.message}`,
+      };
+    }
+  }
+
+  const cleared = await clearStripeBalanceTransactionQuickBooksPush(
+    lotusTransactionId,
+  );
+  if (!cleared.ok) return cleared;
+
+  for (const receipt of receipts) {
+    await tombstoneLocalQuickBooksReceipt(receipt.entity, receipt.id);
+  }
+  return cleared;
 }
 
 export async function pushStripeBalanceTransactionToQuickBooks(

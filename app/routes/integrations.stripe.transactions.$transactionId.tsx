@@ -16,6 +16,7 @@ import { getProductMatchRuleById, listProducts } from "~/lib/products.server";
 import { getQuickBooksRefundReceiptByQuickbooksId } from "~/lib/quickbooks-refund-receipts.server";
 import { getQuickBooksSalesReceiptByQuickbooksId } from "~/lib/quickbooks-sales-receipts.server";
 import { getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
+import { updateStripeTransactionQuickBooksDescription } from "~/lib/stripe-quickbooks-description-update.server";
 import { clearStripeTransactionQuickBooksPush } from "~/lib/stripe-quickbooks-push-execute.server";
 import { getStripeBalanceTransactionById } from "~/lib/stripe-balance-transactions.server";
 import { planStripeQuickBooksPushForTransaction } from "~/lib/stripe-quickbooks-push-plan.server";
@@ -241,6 +242,24 @@ export async function action({ request, params }: Route.ActionArgs) {
       return { scope: "wcProduct" as const, error: result.reason };
     }
     return redirect(redirectUrl);
+  }
+
+  if (intent === "update-qb-description") {
+    const denied = adminPermissionError(user);
+    if (denied) {
+      return { scope: "qbDescription" as const, error: denied };
+    }
+    const result = await updateStripeTransactionQuickBooksDescription(
+      params.transactionId,
+    );
+    if (!result.ok) {
+      return { scope: "qbDescription" as const, error: result.message };
+    }
+    return {
+      scope: "qbDescription" as const,
+      description: result.description,
+      documentId: result.documentId,
+    };
   }
 
   if (intent === "clear-qb-push") {
@@ -626,6 +645,38 @@ export default function StripeTransactionDetailPage({
           <DetailRow label="Available on">
             {formatDateTime(tx.availableOn)}
           </DetailRow>
+          <DetailRow label="QuickBooks description">
+            <MultilineText
+              value={
+                pushPlan.refundReceipt?.Line[0]?.Description ??
+                pushPlan.salesReceipt?.Line[0]?.Description
+              }
+            />
+            {canClearQuickBooksPush &&
+            (tx.quickbooksSalesReceiptId || tx.quickbooksRefundReceiptId) ? (
+              <Form method="post" action={postAction} className="mt-2">
+                <input type="hidden" name="returnTo" value={returnTo} />
+                <SubmitButton
+                  intent="update-qb-description"
+                  variant="outline"
+                  loadingLabel="Updating QuickBooks…"
+                >
+                  Update description in QuickBooks
+                </SubmitButton>
+              </Form>
+            ) : null}
+            {actionData?.scope === "qbDescription" && actionData.error ? (
+              <p role="alert" className="mt-2 text-sm text-maroon">
+                {actionData.error}
+              </p>
+            ) : null}
+            {actionData?.scope === "qbDescription" &&
+            "description" in actionData ? (
+              <p role="status" className="mt-2 text-sm text-dark">
+                QuickBooks description updated.
+              </p>
+            ) : null}
+          </DetailRow>
           <DetailRow label="QuickBooks">
             <div className="flex flex-wrap items-center gap-2">
               {quickbooksPushStatus(tx.pushedToQuickbooks) === "yes" ? (
@@ -650,13 +701,19 @@ export default function StripeTransactionDetailPage({
                     intent="clear-qb-push"
                     variant="ghost"
                     className="!px-0 !py-0 text-xs"
-                    loadingLabel="Clearing…"
+                    loadingLabel="Checking QuickBooks…"
                   >
                     Clear pushed flag
                   </SubmitButton>
                 </Form>
               ) : null}
             </div>
+            {tx.quickbooksSalesReceiptId || tx.quickbooksRefundReceiptId ? (
+              <p className="mt-1 text-xs text-ink-faint">
+                The flag clears only after QuickBooks reports that receipt is
+                deleted.
+              </p>
+            ) : null}
           </DetailRow>
           {tx.quickbooksRefundReceiptId ? (
             <DetailRow label="QB refund receipt">

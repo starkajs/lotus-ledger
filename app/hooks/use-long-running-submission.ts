@@ -17,7 +17,7 @@ const INTENT_MESSAGES: Record<string, string> = {
   reclassify: "Re-classifying transaction…",
   refresh: "Refreshing from QuickBooks…",
   push: "Pushing to QuickBooks…",
-  "clear-qb-push": "Clearing QuickBooks push flag…",
+  "clear-qb-push": "Checking QuickBooks for the receipt…",
 };
 
 function messageForIntent(intent: string, pathname: string): string {

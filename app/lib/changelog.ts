@@ -21,6 +21,18 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-quickbooks-description",
+    shipped: "2026-10-10",
+    title: "QuickBooks descriptions, and a safer clear",
+    changes: [
+      "The description sent to QuickBooks starts with the Lotus product, then the Stripe detail, line item, SKU, and WooCommerce order when those differ.",
+      "Administrators can update that description on a receipt that was already pushed. The update rewrites the existing receipt.",
+      "Clearing the pushed flag now waits until QuickBooks reports that receipt is deleted. If the receipt is still there, Lotus keeps the link.",
+    ],
+    commit: "",
+    parent: "59c6eb9c26114094287e087206c33b0f7b990a38",
+  },
+  {
     id: "2026-10-10-sessions",
     shipped: "2026-10-10",
     title: "Shorter sessions and a sign-in record",

@@ -100,6 +100,182 @@ export type QuickBooksRefundReceiptCreateOutcome =
     }
   | { ok: false; message: string; raw: unknown };
 
+type QuickBooksWritableLine = {
+  Id?: string;
+  Description?: string;
+  DetailType?: string;
+  Amount?: number;
+  SalesItemLineDetail?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+type QuickBooksReadEntity = {
+  Id?: string;
+  SyncToken?: string;
+  Line?: QuickBooksWritableLine[];
+};
+
+function withUpdatedLineDescriptions(
+  lines: QuickBooksWritableLine[],
+  description: string,
+): QuickBooksWritableLine[] {
+  let updated = false;
+  const next = lines.map((line) => {
+    if (
+      line.DetailType === "SalesItemLineDetail" ||
+      line.SalesItemLineDetail != null
+    ) {
+      updated = true;
+      return { ...line, Description: description };
+    }
+    return line;
+  });
+  if (!updated && next[0]) {
+    next[0] = { ...next[0], Description: description };
+  }
+  return next;
+}
+
+/** True when a QuickBooks read says that entity was deleted (fault 610). */
+export function quickBooksFaultMeansDeleted(raw: unknown): boolean {
+  const seen = new Set<unknown>();
+  const codes: string[] = [];
+  const texts: string[] = [];
+
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 6 || value == null || typeof value !== "object") return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+    const record = value as Record<string, unknown>;
+    if (typeof record.code === "string" || typeof record.code === "number") {
+      codes.push(String(record.code));
+    }
+    for (const key of ["Message", "Detail", "message", "detail"]) {
+      if (typeof record[key] === "string") texts.push(record[key]);
+    }
+    for (const key of ["Fault", "Error", "json", "body", "authResponse", "response"]) {
+      if (key in record) visit(record[key], depth + 1);
+    }
+  };
+
+  visit(raw, 0);
+  if (codes.includes("610")) return true;
+  return texts.join(" ").toLowerCase().includes("has been deleted");
+}
+
+export type QuickBooksReceiptPresence =
+  | { state: "present" }
+  | { state: "absent" }
+  | { state: "unknown"; message: string };
+
+/** Live read of one Sales Receipt or Refund Receipt. */
+export async function quickBooksReceiptPresence(input: {
+  entity: "salesreceipt" | "refundreceipt";
+  id: string;
+}): Promise<QuickBooksReceiptPresence> {
+  const current = await readQuickBooksEntity(input.entity, input.id);
+  if (current.ok) return { state: "present" };
+  if (quickBooksFaultMeansDeleted(current.raw)) return { state: "absent" };
+  return { state: "unknown", message: current.message };
+}
+
+async function readQuickBooksEntity(
+  entity: "salesreceipt" | "refundreceipt",
+  id: string,
+): Promise<
+  | { ok: true; body: QuickBooksReadEntity; responseKey: "SalesReceipt" | "RefundReceipt" }
+  | { ok: false; message: string; raw: unknown }
+> {
+  const { client, tokens } = await getAuthenticatedQuickBooksClient();
+  const responseKey = entity === "salesreceipt" ? "SalesReceipt" : "RefundReceipt";
+  const url = `${getApiBaseUrl()}/v3/company/${tokens.realmId}/${entity}/${encodeURIComponent(id)}?minorversion=${MINOR_VERSION}`;
+
+  try {
+    const response = await client.makeApiCall({
+      url,
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    const body = response.json as Record<string, QuickBooksReadEntity | undefined>;
+    const entityBody = body[responseKey];
+    if (!entityBody?.Id || entityBody.SyncToken == null) {
+      return {
+        ok: false,
+        message: `QuickBooks did not return ${responseKey} ${id}`,
+        raw: body,
+      };
+    }
+    return { ok: true, body: entityBody, responseKey };
+  } catch (err) {
+    const raw = quickBooksErrorPayload(err) ?? { error: String(err) };
+    return { ok: false, message: formatQuickBooksErrorMessage(err, raw), raw };
+  }
+}
+
+/**
+ * Rewrite the line description on an existing Sales Receipt or Refund Receipt.
+ * Sends the receipt lines back with the new Description. It does not create
+ * a second receipt.
+ */
+export async function updateQuickBooksReceiptDescription(input: {
+  entity: "salesreceipt" | "refundreceipt";
+  id: string;
+  description: string;
+}): Promise<
+  | { ok: true; receipt: QuickBooksReadEntity; raw: unknown }
+  | { ok: false; message: string; raw: unknown }
+> {
+  const current = await readQuickBooksEntity(input.entity, input.id);
+  if (!current.ok) return current;
+
+  const lines = current.body.Line ?? [];
+  if (lines.length === 0) {
+    return {
+      ok: false,
+      message: "QuickBooks receipt has no lines to update",
+      raw: current.body,
+    };
+  }
+
+  const { client, tokens } = await getAuthenticatedQuickBooksClient();
+  const url = `${getApiBaseUrl()}/v3/company/${tokens.realmId}/${input.entity}?minorversion=${MINOR_VERSION}`;
+  const payload = {
+    Id: current.body.Id,
+    SyncToken: current.body.SyncToken,
+    sparse: true,
+    Line: withUpdatedLineDescriptions(lines, input.description),
+  };
+
+  try {
+    const response = await client.makeApiCall({
+      url,
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const body = response.json as Record<string, QuickBooksReadEntity | undefined>;
+    const receipt = body[current.responseKey];
+    if (!receipt?.Id) {
+      return {
+        ok: false,
+        message: "QuickBooks did not return the updated receipt",
+        raw: body,
+      };
+    }
+    return { ok: true, receipt, raw: body };
+  } catch (err) {
+    const raw = quickBooksErrorPayload(err) ?? { error: String(err) };
+    return { ok: false, message: formatQuickBooksErrorMessage(err, raw), raw };
+  }
+}
+
 /**
  * Create a Refund Receipt in QuickBooks.
  * POST /v3/company/{realmId}/refundreceipt?minorversion=65

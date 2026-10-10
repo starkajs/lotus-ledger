@@ -452,7 +452,7 @@ export default function StripeQuickBooksPushPage({
                 <span className="font-mono text-xs">
                   {previewQuickbooksSalesReceiptId}
                 </span>
-                ). Clear the flag to push again.
+                ). Delete that receipt in QuickBooks before clearing the flag.
               </p>
             )}
             {previewTxnId && canPushToQuickBooks && (
@@ -468,7 +468,7 @@ export default function StripeQuickBooksPushPage({
                     <SubmitButton
                       intent="clear-qb-push"
                       variant="pill"
-                      loadingLabel="Clearing…"
+                      loadingLabel="Checking QuickBooks…"
                     >
                       Clear pushed flag
                     </SubmitButton>

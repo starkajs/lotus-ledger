@@ -26,7 +26,7 @@ import { isStripeRefundTransaction } from "~/lib/stripe-quickbooks.constants";
 import { stripeQuickBooksTrackingNum } from "~/lib/stripe-quickbooks-receipt-link.server";
 import type { StripeBalanceTransactionRecord } from "~/lib/stripe-balance-transactions.server";
 import { getProductById } from "~/lib/products.server";
-import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
+import { transferredQuickBooksDescription } from "~/lib/stripe-quickbooks-description";
 
 function lotusProductLabelForPrivateNote(
   productCode: string | null | undefined,
@@ -75,31 +75,6 @@ function applyTemplate(
     const v = vars[key];
     return v == null ? "" : String(v);
   });
-}
-
-/** Stripe charge/refund description for the QuickBooks line. */
-function stripeDescriptionForQuickBooksLine(
-  transaction: Pick<
-    StripeBalanceTransactionRecord,
-    "description" | "stripeRaw" | "sku" | "productCode"
-  >,
-  isRefund: boolean,
-): string {
-  const signals = extractStripeTransactionProductSignals({
-    stripeRaw: transaction.stripeRaw,
-    description: transaction.description,
-    sku: transaction.sku,
-  });
-  const fromStripe =
-    signals.description?.trim() ||
-    signals.chargeDescription?.trim() ||
-    signals.balanceDescription?.trim() ||
-    transaction.description?.trim();
-  return (
-    fromStripe ||
-    transaction.productCode?.trim() ||
-    (isRefund ? "Refund" : "Sale")
-  );
 }
 
 export function planStripeQuickBooksPush(input: {
@@ -217,10 +192,16 @@ export function planStripeQuickBooksPush(input: {
     fee: minorUnitsToMajor(input.transaction.fee, input.transaction.currency),
   };
 
-  const lineDescription = stripeDescriptionForQuickBooksLine(
-    input.transaction,
+  const lineDescription = transferredQuickBooksDescription({
+    productCode: input.transaction.productCode,
+    productName: input.transaction.productName,
+    description: input.transaction.description,
+    stripeRaw: input.transaction.stripeRaw,
+    sku: input.transaction.sku,
+    wcOrderId: input.transaction.wcOrderId,
+    orderKey: input.transaction.orderKey,
     isRefund,
-  );
+  });
 
   const paymentRefTemplate =
     input.stripeQb?.quickbooksPaymentRefTemplate?.trim() ||
