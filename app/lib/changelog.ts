@@ -30,7 +30,7 @@ export const changelog: ChangelogEntry[] = [
       "The QuickBooks connection cookie is only sent over HTTPS.",
       "The app image now runs on Node 22.",
     ],
-    commit: "87a8eb7f9215e3b922b7d062aa880e4286b703da",
+    commit: "65613375054a13c8dc3fab1fb9d463ef92c658ae",
     parent: "e3c2bf224c4605668afccfe337a99d0fe4132e58",
   },
   {
