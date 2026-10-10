@@ -21,6 +21,17 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-wc-order-filters",
+    shipped: "2026-10-10",
+    title: "Filter WooCommerce orders by product and amount",
+    changes: [
+      "WooCommerce orders can be filtered by a Lotus product, and by an amount from and amount to.",
+      "The sales by product page uses the same filters.",
+    ],
+    commit: "",
+    parent: "170b0174ea8fa6cbd9fb9c2847e48c716206f87b",
+  },
+  {
     id: "2026-10-10-wc-order-product-link",
     shipped: "2026-10-10",
     title: "Assigning an order links the shop product",

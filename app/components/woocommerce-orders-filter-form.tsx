@@ -3,6 +3,7 @@ import {
   DATE_PERIOD_PRESETS,
   type DatePeriodPreset,
 } from "~/lib/date-range-filters";
+import type { ProductRecord } from "~/lib/products.server";
 
 type WooCommerceOrdersFilterFormProps = {
   status: string;
@@ -11,6 +12,10 @@ type WooCommerceOrdersFilterFormProps = {
   dateTo: string | null;
   period: DatePeriodPreset | null;
   lotusProductMissing: boolean;
+  lotusProductId: string | null;
+  catalogProducts: ProductRecord[];
+  amountMin: number | null;
+  amountMax: number | null;
   stripeSearch: string;
   stripeLinked: "all" | "linked" | "not_linked";
   action?: string;
@@ -23,6 +28,10 @@ export function WooCommerceOrdersFilterForm({
   dateTo,
   period,
   lotusProductMissing,
+  lotusProductId,
+  catalogProducts,
+  amountMin,
+  amountMax,
   stripeSearch,
   stripeLinked,
   action,
@@ -89,6 +98,41 @@ export function WooCommerceOrdersFilterForm({
         />
         Lotus product missing
       </label>
+      <label className="flex flex-col gap-0.5 text-xs">
+        <span className="text-ink-muted">Lotus product</span>
+        <select
+          name="lotusProduct"
+          defaultValue={lotusProductId ?? ""}
+          className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[14rem]"
+        >
+          <option value="">All</option>
+          {catalogProducts.map((product) => (
+            <option key={product.id} value={product.id}>
+              {product.code} — {product.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-0.5 text-xs">
+        <span className="text-ink-muted">Amount from</span>
+        <input
+          name="amountMin"
+          inputMode="decimal"
+          defaultValue={amountMin ?? ""}
+          placeholder="0.00"
+          className="w-24 rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
+        />
+      </label>
+      <label className="flex flex-col gap-0.5 text-xs">
+        <span className="text-ink-muted">Amount to</span>
+        <input
+          name="amountMax"
+          inputMode="decimal"
+          defaultValue={amountMax ?? ""}
+          placeholder="0.00"
+          className="w-24 rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
+        />
+      </label>
       <label className="flex items-center gap-2 pb-1.5 text-xs text-ink-muted">
         <input
           type="checkbox"
@@ -124,6 +168,9 @@ export function WooCommerceOrdersFilterSummary({
   dateTo,
   period,
   lotusProductMissing,
+  lotusProductLabel,
+  amountMin,
+  amountMax,
   stripeSearch,
   stripeLinked,
 }: {
@@ -131,6 +178,9 @@ export function WooCommerceOrdersFilterSummary({
   dateTo: string | null;
   period: DatePeriodPreset | null;
   lotusProductMissing: boolean;
+  lotusProductLabel: string | null;
+  amountMin: number | null;
+  amountMax: number | null;
   stripeSearch: string;
   stripeLinked: "all" | "linked" | "not_linked";
 }) {
@@ -139,6 +189,9 @@ export function WooCommerceOrdersFilterSummary({
     !dateTo &&
     !period &&
     !lotusProductMissing &&
+    !lotusProductLabel &&
+    amountMin == null &&
+    amountMax == null &&
     !stripeSearch &&
     stripeLinked === "all"
   ) {
@@ -167,6 +220,24 @@ export function WooCommerceOrdersFilterSummary({
       {lotusProductMissing && (
         <span className={dateFrom || dateTo || period ? " · " : ""}>
           No linked Lotus product on any line
+        </span>
+      )}
+      {lotusProductLabel && (
+        <span>
+          {" "}
+          · Lotus product{" "}
+          <span className="text-dark">{lotusProductLabel}</span>
+        </span>
+      )}
+      {(amountMin != null || amountMax != null) && (
+        <span>
+          {" "}
+          · Amount{" "}
+          {amountMin != null && amountMax != null
+            ? `${amountMin} – ${amountMax}`
+            : amountMin != null
+              ? `from ${amountMin}`
+              : `to ${amountMax}`}
         </span>
       )}
       {stripeSearch && (

@@ -4,11 +4,13 @@ import {
   count,
   desc,
   eq,
+  gte,
   getTableColumns,
   ilike,
   inArray,
   isNotNull,
   isNull,
+  lte,
   max,
   or,
   sql,
@@ -364,6 +366,11 @@ export type ListWooCommerceOrdersOptions = {
   dateTo?: IsoDateString | null;
   /** Only orders with no line item linked to a Lotus catalog product. */
   lotusProductMissing?: boolean;
+  /** Orders whose line or manual assignment uses this Lotus product. */
+  lotusProductId?: string | null;
+  /** Order total bounds in major currency units. */
+  amountMin?: number | null;
+  amountMax?: number | null;
   stripeSearch?: string;
   stripeLinked?: "all" | "linked" | "not_linked";
   page?: number;
@@ -382,6 +389,29 @@ const orderHasLinkedStripe = sql`exists (
       and st.wc_order_id is not null)
   )
 )`;
+
+function orderMatchesLotusProduct(productId: string) {
+  return sql`(
+    ${woocommerceOrders.productId} = ${productId}::uuid
+    or exists (
+      select 1
+      from jsonb_array_elements(coalesce(${woocommerceOrders.lineItems}, '[]'::jsonb)) as line(elem)
+      inner join ${woocommerceProducts} wp
+        on wp.wc_product_id = (line.elem->>'productId')::int
+      where wp.product_id = ${productId}::uuid
+        and coalesce((line.elem->>'productId')::int, 0) > 0
+    )
+  )`;
+}
+
+/** Major-unit amount as minor units for the order's currency. */
+function orderAmountMinorSql(major: number) {
+  const twoDecimal = Math.round(major * 100);
+  const zeroDecimal = Math.round(major);
+  return sql`case when lower(${woocommerceOrders.currency}) in (
+    'bif','clp','djf','gnf','jpy','kmf','krw','mga','pyg','rwf','ugx','vnd','vuv','xaf','xof','xpf'
+  ) then ${zeroDecimal} else ${twoDecimal} end`;
+}
 
 const orderHasMappedLotusProduct = sql`exists (
   select 1
@@ -413,6 +443,21 @@ function buildWooCommerceOrdersWhere(options: ListWooCommerceOrdersOptions) {
   if (options.lotusProductMissing) {
     filters.push(
       sql`not (${orderHasMappedLotusProduct} or ${woocommerceOrders.productId} is not null)`,
+    );
+  }
+
+  if (options.lotusProductId) {
+    filters.push(orderMatchesLotusProduct(options.lotusProductId));
+  }
+
+  if (options.amountMin != null) {
+    filters.push(
+      gte(woocommerceOrders.totalMinor, orderAmountMinorSql(options.amountMin)),
+    );
+  }
+  if (options.amountMax != null) {
+    filters.push(
+      lte(woocommerceOrders.totalMinor, orderAmountMinorSql(options.amountMax)),
     );
   }
 

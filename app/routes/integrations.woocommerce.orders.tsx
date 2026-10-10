@@ -250,11 +250,14 @@ export async function loader({ request }: Route.LoaderArgs) {
       dateFrom: parsed.dateFrom,
       dateTo: parsed.dateTo,
       lotusProductMissing: parsed.lotusProductMissing,
+      lotusProductId: parsed.lotusProductId,
+      amountMin: parsed.amountMin,
+      amountMax: parsed.amountMax,
       stripeSearch: parsed.stripeSearch,
       stripeLinked: parsed.stripeLinked,
     }),
     listDistinctWooCommerceOrderStatuses(),
-    listProducts({ activeOnly: true }),
+    listProducts(),
   ]);
 
   const status =
@@ -357,6 +360,9 @@ export default function WooCommerceOrdersPage({
     dateTo,
     period,
     lotusProductMissing,
+    lotusProductId,
+    amountMin,
+    amountMax,
     stripeSearch,
     stripeLinked,
     catalogProducts,
@@ -417,13 +423,23 @@ export default function WooCommerceOrdersPage({
     dateTo,
     period,
     lotusProductMissing,
+    lotusProductId,
+    amountMin,
+    amountMax,
     stripeSearch,
     stripeLinked,
   };
 
+  const lotusProductLabel =
+    catalogProducts.find((product) => product.id === lotusProductId)?.code ??
+    null;
+
   const hasFilters =
     status !== "all" ||
     lotusProductMissing ||
+    lotusProductId != null ||
+    amountMin != null ||
+    amountMax != null ||
     dateFrom != null ||
     dateTo != null ||
     period != null ||
@@ -544,6 +560,10 @@ export default function WooCommerceOrdersPage({
             dateTo={dateTo}
             period={period}
             lotusProductMissing={lotusProductMissing}
+            lotusProductId={lotusProductId}
+            catalogProducts={catalogProducts}
+            amountMin={amountMin}
+            amountMax={amountMax}
             stripeSearch={stripeSearch}
             stripeLinked={stripeLinked}
           />
@@ -552,6 +572,9 @@ export default function WooCommerceOrdersPage({
             dateTo={dateTo}
             period={period}
             lotusProductMissing={lotusProductMissing}
+            lotusProductLabel={lotusProductLabel}
+            amountMin={amountMin}
+            amountMax={amountMax}
             stripeSearch={stripeSearch}
             stripeLinked={stripeLinked}
           />

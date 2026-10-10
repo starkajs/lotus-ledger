@@ -9,6 +9,12 @@ export type WooCommerceOrderListFilters = {
   dateTo: string | null;
   period: DatePeriodPreset | null;
   lotusProductMissing: boolean;
+  /** Lotus catalog product id. Orders linked on a line or assigned manually. */
+  lotusProductId: string | null;
+  /** Order total lower bound, in major currency units. */
+  amountMin: number | null;
+  /** Order total upper bound, in major currency units. */
+  amountMax: number | null;
   /** Order key, order #, or Stripe transaction id. */
   stripeSearch: string;
   stripeLinked: "all" | "linked" | "not_linked";
@@ -23,6 +29,9 @@ export function parseWooCommerceOrderFiltersFromUrl(
   | "dateTo"
   | "period"
   | "lotusProductMissing"
+  | "lotusProductId"
+  | "amountMin"
+  | "amountMax"
   | "stripeSearch"
   | "stripeLinked"
 > {
@@ -33,6 +42,15 @@ export function parseWooCommerceOrderFiltersFromUrl(
   });
   const status = params.get("status")?.trim() ?? "all";
   const lotusProductMissing = params.get("lotusMissing") === "yes";
+  const lotusProductRaw = params.get("lotusProduct")?.trim() ?? "";
+  const lotusProductId =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      lotusProductRaw,
+    )
+      ? lotusProductRaw
+      : null;
+  const amountMin = parseAmountParam(params.get("amountMin"));
+  const amountMax = parseAmountParam(params.get("amountMax"));
   const stripeSearch = params.get("stripe")?.trim() ?? "";
   const stripeNotLinked =
     params.get("stripeNotLinked") === "yes" ||
@@ -51,6 +69,9 @@ export function parseWooCommerceOrderFiltersFromUrl(
     dateTo,
     period,
     lotusProductMissing,
+    lotusProductId,
+    amountMin,
+    amountMax,
     stripeSearch,
     stripeLinked,
   };
@@ -76,6 +97,9 @@ export function buildWooCommerceOrdersSearchParams(
   if (filters.status !== "all") params.set("status", filters.status);
   appendWooCommerceOrderDateFilters(params, filters);
   if (filters.lotusProductMissing) params.set("lotusMissing", "yes");
+  if (filters.lotusProductId) params.set("lotusProduct", filters.lotusProductId);
+  if (filters.amountMin != null) params.set("amountMin", String(filters.amountMin));
+  if (filters.amountMax != null) params.set("amountMax", String(filters.amountMax));
   if (filters.stripeSearch.trim()) params.set("stripe", filters.stripeSearch.trim());
   if (filters.stripeLinked === "not_linked") {
     params.set("stripeNotLinked", "yes");
@@ -84,6 +108,15 @@ export function buildWooCommerceOrdersSearchParams(
   }
   if (page != null && page > 1) params.set("page", String(page));
   return params;
+}
+
+function parseAmountParam(value: string | null): number | null {
+  if (!value?.trim()) return null;
+  const cleaned = value.trim().replace(/[£,\s]/g, "");
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null;
+  const amount = Number(cleaned);
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  return amount;
 }
 
 export function wooCommerceOrdersHref(

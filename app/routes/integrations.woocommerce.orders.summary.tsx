@@ -17,6 +17,7 @@ import {
   listDistinctWooCommerceOrderStatuses,
   type WooCommerceLotusProductAggregate,
 } from "~/lib/woocommerce-orders.server";
+import { listProducts } from "~/lib/products.server";
 import { requireUser } from "~/lib/session.server";
 
 const ORDERS_PATH = "/integrations/woocommerce/orders";
@@ -65,16 +66,20 @@ export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const parsed = parseWooCommerceOrderFiltersFromUrl(url.searchParams);
 
-  const [aggregation, statuses] = await Promise.all([
+  const [aggregation, statuses, catalogProducts] = await Promise.all([
     aggregateWooCommerceOrdersByLotusAndLine({
       status: parsed.status,
       dateFrom: parsed.dateFrom,
       dateTo: parsed.dateTo,
       lotusProductMissing: parsed.lotusProductMissing,
+      lotusProductId: parsed.lotusProductId,
+      amountMin: parsed.amountMin,
+      amountMax: parsed.amountMax,
       stripeSearch: parsed.stripeSearch,
       stripeLinked: parsed.stripeLinked,
     }),
     listDistinctWooCommerceOrderStatuses(),
+    listProducts(),
   ]);
 
   const status =
@@ -87,6 +92,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     statuses,
     ...parsed,
     status,
+    catalogProducts,
   };
 }
 
@@ -105,9 +111,17 @@ export default function WooCommerceOrdersSummaryPage({
     dateTo,
     period,
     lotusProductMissing,
+    lotusProductId,
+    amountMin,
+    amountMax,
     stripeSearch,
     stripeLinked,
+    catalogProducts,
   } = loaderData;
+
+  const lotusProductLabel =
+    catalogProducts.find((product) => product.id === lotusProductId)?.code ??
+    null;
 
   const listFilters: WooCommerceOrderListFilters = {
     status,
@@ -115,6 +129,9 @@ export default function WooCommerceOrdersSummaryPage({
     dateTo,
     period,
     lotusProductMissing,
+    lotusProductId,
+    amountMin,
+    amountMax,
     stripeSearch,
     stripeLinked,
   };
@@ -172,6 +189,10 @@ export default function WooCommerceOrdersSummaryPage({
             dateTo={dateTo}
             period={period}
             lotusProductMissing={lotusProductMissing}
+            lotusProductId={lotusProductId}
+            catalogProducts={catalogProducts}
+            amountMin={amountMin}
+            amountMax={amountMax}
             stripeSearch={stripeSearch}
             stripeLinked={stripeLinked}
             action={SUMMARY_PATH}
@@ -181,6 +202,9 @@ export default function WooCommerceOrdersSummaryPage({
             dateTo={dateTo}
             period={period}
             lotusProductMissing={lotusProductMissing}
+            lotusProductLabel={lotusProductLabel}
+            amountMin={amountMin}
+            amountMax={amountMax}
             stripeSearch={stripeSearch}
             stripeLinked={stripeLinked}
           />
