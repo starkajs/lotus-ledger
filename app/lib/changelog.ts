@@ -30,7 +30,7 @@ export const changelog: ChangelogEntry[] = [
       "Administrators can read recent sign-ins, failed attempts, and sign-outs.",
       "The app process runs as the node user. The QuickBooks client uses patched axios and form-data.",
     ],
-    commit: "",
+    commit: "8e2a34e45855210823daddef75e673c2bfb33049",
     parent: "06f55612ee768b7ce486c18e5e1e4af8f2c4a829",
   },
   {
