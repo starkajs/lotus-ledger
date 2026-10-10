@@ -21,6 +21,17 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-home-syncs",
+    shipped: "2026-10-10",
+    title: "Last syncs on Home",
+    changes: [
+      "Home shows when the nightly sync, WooCommerce, Stripe, and QuickBooks pulls last ran, with the status and result.",
+      "A sync that has never run is marked Never. Job history still has the full log.",
+    ],
+    commit: "",
+    parent: "1e082e37d38e86f49023a2378e6d0a258eaff61f",
+  },
+  {
     id: "2026-10-10-quickbooks-description",
     shipped: "2026-10-10",
     title: "QuickBooks descriptions, and a safer clear",

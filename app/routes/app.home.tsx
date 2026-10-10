@@ -7,6 +7,12 @@ import {
   type DashboardCellAmount,
   type DashboardGranularity,
 } from "~/lib/dashboard-net-by-product.server";
+import {
+  formatJobDuration,
+  HOME_SYNC_LABELS,
+  summarizeJobResult,
+} from "~/lib/integration-jobs";
+import { listLatestHomeSyncs } from "~/lib/integration-jobs.server";
 import { formatMoneyMinor } from "~/lib/money";
 import { requireUser } from "~/lib/session.server";
 
@@ -33,8 +39,25 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   const url = new URL(request.url);
   const params = parseDashboardQueryParams(url.searchParams);
-  const dashboard = await getNetByProductDashboard(params);
-  return { dashboard, params };
+  const [dashboard, syncs] = await Promise.all([
+    getNetByProductDashboard(params),
+    listLatestHomeSyncs(),
+  ]);
+  return { dashboard, params, syncs };
+}
+
+function formatWhen(iso: string | null) {
+  if (!iso) return "Never";
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(iso));
+}
+
+function syncStatusClass(status: string | null) {
+  if (status === "completed") return "text-jade";
+  if (status === "failed") return "text-maroon";
+  return "text-ink-muted";
 }
 
 function formatCellAmounts(amounts: DashboardCellAmount[] | undefined) {
@@ -57,7 +80,7 @@ function formatCellAmounts(amounts: DashboardCellAmount[] | undefined) {
 }
 
 export default function AppHome({ loaderData }: Route.ComponentProps) {
-  const { dashboard, params } = loaderData;
+  const { dashboard, params, syncs } = loaderData;
   const { columns, buckets, cells, granularity, periods } = dashboard;
 
   const hasData = buckets.some((b) =>
@@ -83,6 +106,64 @@ export default function AppHome({ loaderData }: Route.ComponentProps) {
       description="Net totals by product from synced Stripe balance transactions."
     >
       <section className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-sand-dark/40 px-4 py-3 sm:px-6">
+          <div>
+            <h2 className="text-sm font-medium text-dark">Last syncs</h2>
+            <p className="mt-1 text-xs text-ink-muted">
+              The most recent run of each sync. The nightly job is the
+              scheduled WooCommerce, Stripe, and QuickBooks pass.
+            </p>
+          </div>
+          <Link
+            to="/integrations/jobs"
+            className="text-xs text-teal hover:underline"
+          >
+            Job history
+          </Link>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[36rem] text-left text-xs">
+            <thead className="bg-surface text-dark">
+              <tr>
+                <th className="px-3 py-2 font-medium">Sync</th>
+                <th className="px-3 py-2 font-medium">Last run</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium">Result</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-sand-dark/30">
+              {syncs.map((sync) => (
+                <tr key={sync.jobType} className="hover:bg-sand/15">
+                  <td className="px-3 py-2 font-medium text-dark">
+                    {HOME_SYNC_LABELS[sync.jobType]}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-ink-muted">
+                    {formatWhen(sync.finishedAt ?? sync.startedAt)}
+                    {sync.durationMs != null ? (
+                      <span className="text-ink-faint">
+                        {" "}
+                        · {formatJobDuration(sync.durationMs)}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className={`px-3 py-2 capitalize ${syncStatusClass(sync.status)}`}>
+                    {sync.status ?? "Never"}
+                  </td>
+                  <td className="px-3 py-2 text-ink-muted">
+                    {sync.status === "failed" && sync.errorMessage
+                      ? sync.errorMessage
+                      : sync.status
+                        ? summarizeJobResult(sync.result)
+                        : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mt-6 rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay">
         <div className="border-b border-sand-dark/40 px-4 py-3 sm:px-6">
           <h2 className="text-sm font-medium text-dark">
             Net by product (last {periods} {periodUnit})

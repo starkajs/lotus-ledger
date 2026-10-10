@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   classificationEvents,
@@ -12,6 +12,8 @@ import {
   type IntegrationJobStatus,
   type IntegrationJobTrigger,
   type IntegrationJobType,
+  HOME_SYNC_JOB_TYPES,
+  type HomeSyncJobType,
 } from "~/lib/integration-jobs";
 
 export type {
@@ -148,6 +150,60 @@ export async function recordClassificationEvent(input: {
     newMatchRuleId: input.after.productMatchRuleId,
     previousStatus: input.before.productMatchStatus,
     newStatus: input.after.productMatchStatus,
+  });
+}
+
+export type HomeSyncSnapshot = {
+  jobType: HomeSyncJobType;
+  status: IntegrationJobStatus | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+  result: Record<string, unknown> | null;
+  errorMessage: string | null;
+};
+
+/** Most recent run of each sync shown on Home. Missing types have never run. */
+export async function listLatestHomeSyncs(): Promise<HomeSyncSnapshot[]> {
+  const db = getDb();
+  const rows = await db
+    .selectDistinctOn([integrationJobRuns.jobType], {
+      jobType: integrationJobRuns.jobType,
+      status: integrationJobRuns.status,
+      startedAt: integrationJobRuns.startedAt,
+      finishedAt: integrationJobRuns.finishedAt,
+      durationMs: integrationJobRuns.durationMs,
+      result: integrationJobRuns.result,
+      errorMessage: integrationJobRuns.errorMessage,
+    })
+    .from(integrationJobRuns)
+    .where(inArray(integrationJobRuns.jobType, [...HOME_SYNC_JOB_TYPES]))
+    .orderBy(integrationJobRuns.jobType, desc(integrationJobRuns.startedAt));
+
+  const byType = new Map(rows.map((row) => [row.jobType, row]));
+
+  return HOME_SYNC_JOB_TYPES.map((jobType) => {
+    const row = byType.get(jobType);
+    if (!row) {
+      return {
+        jobType,
+        status: null,
+        startedAt: null,
+        finishedAt: null,
+        durationMs: null,
+        result: null,
+        errorMessage: null,
+      };
+    }
+    return {
+      jobType,
+      status: row.status as IntegrationJobStatus,
+      startedAt: row.startedAt.toISOString(),
+      finishedAt: row.finishedAt?.toISOString() ?? null,
+      durationMs: row.durationMs,
+      result: row.result ?? null,
+      errorMessage: row.errorMessage,
+    };
   });
 }
 

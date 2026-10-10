@@ -63,6 +63,29 @@ export type IntegrationJobRunRecord = {
   errorMessage: string | null;
 };
 
+/** Syncs shown on Home, in the order a person should read them. */
+export const HOME_SYNC_JOB_TYPES = [
+  "integrations_sequential_sync",
+  "woocommerce_orders_sync",
+  "woocommerce_products_sync",
+  "stripe_transactions_sync",
+  "stripe_transactions_classify",
+  "quickbooks_sales_receipts_sync",
+  "quickbooks_refund_receipts_sync",
+] as const satisfies readonly IntegrationJobType[];
+
+export type HomeSyncJobType = (typeof HOME_SYNC_JOB_TYPES)[number];
+
+export const HOME_SYNC_LABELS: Record<HomeSyncJobType, string> = {
+  integrations_sequential_sync: "Nightly sync",
+  woocommerce_orders_sync: "WooCommerce orders",
+  woocommerce_products_sync: "WooCommerce products",
+  stripe_transactions_sync: "Stripe transactions",
+  stripe_transactions_classify: "Stripe classification",
+  quickbooks_sales_receipts_sync: "QuickBooks sales receipts",
+  quickbooks_refund_receipts_sync: "QuickBooks refund receipts",
+};
+
 export function isIntegrationJobType(value: string): value is IntegrationJobType {
   return (INTEGRATION_JOB_TYPES as readonly string[]).includes(value);
 }
