@@ -268,7 +268,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     ...parsed,
     status,
     catalogProducts,
-    bulkAssigned: url.searchParams.get("bulkAssigned"),
+    productsLinked: url.searchParams.get("productsLinked"),
+    ordersManual: url.searchParams.get("ordersManual"),
     bulkSkipped: url.searchParams.get("bulkSkipped"),
   };
 }
@@ -300,11 +301,12 @@ export async function action({ request }: Route.ActionArgs) {
         productId,
       );
       const params = new URLSearchParams(url.searchParams);
-      params.set("bulkAssigned", String(result.updated));
+      params.delete("bulkAssigned");
+      params.delete("bulkSkipped");
+      params.set("productsLinked", String(result.productsLinked));
+      params.set("ordersManual", String(result.ordersManual));
       if (result.skipped > 0) {
         params.set("bulkSkipped", String(result.skipped));
-      } else {
-        params.delete("bulkSkipped");
       }
       const query = params.toString();
       return redirect(query ? `${url.pathname}?${query}` : url.pathname);
@@ -358,7 +360,8 @@ export default function WooCommerceOrdersPage({
     stripeSearch,
     stripeLinked,
     catalogProducts,
-    bulkAssigned,
+    productsLinked,
+    ordersManual,
     bulkSkipped,
   } = loaderData;
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
@@ -494,10 +497,14 @@ export default function WooCommerceOrdersPage({
               {bulkAssignError}
             </p>
           )}
-          {bulkAssigned && (
+          {productsLinked != null && (
             <p className="mb-3 text-sm text-jade" role="status">
-              Assigned a Lotus product to {bulkAssigned} order
-              {bulkAssigned === "1" ? "" : "s"}.
+              {productsLinked === "0"
+                ? "No shop product was linked."
+                : `Linked ${productsLinked} shop product${productsLinked === "1" ? "" : "s"}. Every order with ${productsLinked === "1" ? "that product" : "those products"} now uses this Lotus product.`}
+              {ordersManual && ordersManual !== "0"
+                ? ` ${ordersManual} order${ordersManual === "1" ? "" : "s"} had no shop product, so the Lotus product was set on ${ordersManual === "1" ? "that order" : "those orders"} only.`
+                : ""}
               {bulkSkipped && bulkSkipped !== "0"
                 ? ` ${bulkSkipped} skipped because they were already mapped.`
                 : ""}

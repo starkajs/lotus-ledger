@@ -36,7 +36,7 @@ export function WooCommerceOrdersBulkAssignForm({
           "the selected product";
         const countLabel = `${selectedCount} order${selectedCount === 1 ? "" : "s"}`;
         const confirmed = window.confirm(
-          `Assign ${countLabel} to ${productLabel}?\n\nThis sets a manual Lotus product on each order.`,
+          `Link the shop products on ${countLabel} to ${productLabel}?\n\nEvery other order that uses those shop products is mapped too.`,
         );
         if (!confirmed) {
           event.preventDefault();
@@ -45,8 +45,8 @@ export function WooCommerceOrdersBulkAssignForm({
     >
       <p className="w-full text-xs text-ink-muted">
         {someSelected
-          ? `${selectedCount} unmapped order${selectedCount === 1 ? "" : "s"} selected on this page`
-          : "Select unmapped orders below to assign a Lotus product"}
+          ? `${selectedCount} unmapped order${selectedCount === 1 ? "" : "s"} selected. Linking their shop products maps every order that uses them.`
+          : "Select one unmapped order to link its shop product. Every other order with that product is mapped too."}
       </p>
       {selectedOrderIds.map((id) => (
         <input key={id} type="hidden" name="orderIds" value={id} />
@@ -72,9 +72,9 @@ export function WooCommerceOrdersBulkAssignForm({
         intent="bulk-assign-product"
         variant="pill"
         disabled={!someSelected}
-        loadingLabel="Assigning…"
+        loadingLabel="Linking…"
       >
-        Assign to selected
+        Link shop products
       </SubmitButton>
     </Form>
   );

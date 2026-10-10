@@ -810,13 +810,13 @@ async function attachOrderLineContext(
 export async function bulkSetWooCommerceOrderLotusProducts(
   orderIds: string[],
   productId: string,
-): Promise<{ updated: number; skipped: number }> {
+): Promise<{ productsLinked: number; ordersManual: number; skipped: number }> {
   const ids = [...new Set(orderIds.map((id) => id.trim()).filter(Boolean))].slice(
     0,
     100,
   );
   if (ids.length === 0) {
-    return { updated: 0, skipped: 0 };
+    return { productsLinked: 0, ordersManual: 0, skipped: 0 };
   }
 
   const db = getDb();
@@ -829,19 +829,81 @@ export async function bulkSetWooCommerceOrderLotusProducts(
     throw new Error("Lotus product not found");
   }
 
-  const updated = await db
-    .update(woocommerceOrders)
-    .set({ productId, updatedAt: new Date() })
-    .where(
-      and(
-        inArray(woocommerceOrders.id, ids),
-        isNull(woocommerceOrders.productId),
-        sql`not (${orderHasMappedLotusProduct})`,
-      ),
-    )
-    .returning({ id: woocommerceOrders.id });
+  const orderRows = await db
+    .select({
+      id: woocommerceOrders.id,
+      lineItems: woocommerceOrders.lineItems,
+      productId: woocommerceOrders.productId,
+    })
+    .from(woocommerceOrders)
+    .where(inArray(woocommerceOrders.id, ids));
 
-  return { updated: updated.length, skipped: ids.length - updated.length };
+  const wcProductIds = new Set<number>();
+  for (const order of orderRows) {
+    for (const line of order.lineItems ?? []) {
+      if (line.productId != null && line.productId > 0) {
+        wcProductIds.add(line.productId);
+      }
+    }
+  }
+
+  const now = new Date();
+  const linked =
+    wcProductIds.size === 0
+      ? []
+      : await db
+          .update(woocommerceProducts)
+          .set({ productId, updatedAt: now })
+          .where(
+            and(
+              inArray(woocommerceProducts.wcProductId, [...wcProductIds]),
+              isNull(woocommerceProducts.productId),
+            ),
+          )
+          .returning({ wcProductId: woocommerceProducts.wcProductId });
+  const linkedWcIds = new Set(linked.map((row) => row.wcProductId));
+
+  const manualIds = orderRows
+    .filter((order) => {
+      if (order.productId) return false;
+      return !(order.lineItems ?? []).some(
+        (line) =>
+          line.productId != null && linkedWcIds.has(line.productId),
+      );
+    })
+    .map((order) => order.id);
+
+  const manual =
+    manualIds.length === 0
+      ? []
+      : await db
+          .update(woocommerceOrders)
+          .set({ productId, updatedAt: now })
+          .where(
+            and(
+              inArray(woocommerceOrders.id, manualIds),
+              isNull(woocommerceOrders.productId),
+              sql`not (${orderHasMappedLotusProduct})`,
+            ),
+          )
+          .returning({ id: woocommerceOrders.id });
+
+  const covered = new Set<string>(manual.map((row) => row.id));
+  for (const order of orderRows) {
+    if (
+      (order.lineItems ?? []).some(
+        (line) => line.productId != null && linkedWcIds.has(line.productId),
+      )
+    ) {
+      covered.add(order.id);
+    }
+  }
+
+  return {
+    productsLinked: linked.length,
+    ordersManual: manual.length,
+    skipped: ids.length - covered.size,
+  };
 }
 
 export async function setWooCommerceOrderLotusProduct(

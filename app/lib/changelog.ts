@@ -21,6 +21,17 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-wc-order-product-link",
+    shipped: "2026-10-10",
+    title: "Assigning an order links the shop product",
+    changes: [
+      "Assigning a Lotus product from WooCommerce orders links the shop products on the selected orders.",
+      "Every other order that uses those shop products is mapped as well. An order with no shop product is still set on that order only.",
+    ],
+    commit: "",
+    parent: "ab595c02668213fd65f6c85cdac1adcd732439ab",
+  },
+  {
     id: "2026-10-10-wc-order-lines",
     shipped: "2026-10-10",
     title: "Richer WooCommerce order lines, and bulk assign",
