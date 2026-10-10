@@ -28,7 +28,7 @@ export const changelog: ChangelogEntry[] = [
       "Home shows when the nightly sync, WooCommerce, Stripe, and QuickBooks pulls last ran, with the status and result.",
       "A sync that has never run is marked Never. Job history still has the full log.",
     ],
-    commit: "",
+    commit: "e77bcfbe326702042c7cf3b789c77b422e322a6f",
     parent: "1e082e37d38e86f49023a2378e6d0a258eaff61f",
   },
   {
