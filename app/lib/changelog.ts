@@ -28,7 +28,7 @@ export const changelog: ChangelogEntry[] = [
       "Assigning a Lotus product from WooCommerce orders links the shop products on the selected orders.",
       "Every other order that uses those shop products is mapped as well. An order with no shop product is still set on that order only.",
     ],
-    commit: "",
+    commit: "e8e51a6f5867f2e61db6fbf88dccf51f883d87b0",
     parent: "ab595c02668213fd65f6c85cdac1adcd732439ab",
   },
   {
