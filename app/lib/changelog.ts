@@ -29,7 +29,7 @@ export const changelog: ChangelogEntry[] = [
       "Saving a match rule from a Stripe transaction maps other unmatched charges with the same text. Future syncs use the rule.",
       "A Stripe charge already pushed to QuickBooks keeps its Lotus product.",
     ],
-    commit: "",
+    commit: "6001215034a37fc7dd836396dfd2494ffa8839bb",
     parent: "abf5e92f222d4646315956763d4f244235da0434",
   },
   {
