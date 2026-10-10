@@ -44,6 +44,18 @@ export { WOOCOMMERCE_ORDER_SYNC_DAYS } from "~/lib/woocommerce-orders.constants"
 
 export const WOOCOMMERCE_ORDERS_PAGE_SIZE = 50;
 
+export type WooCommerceOrderLineContext = {
+  lineId: number;
+  /** Shop product name when it says more than the order line name. */
+  catalogName: string | null;
+  /** Course or event title taken from the shop product link. */
+  eventTitle: string | null;
+  /** Line notes such as donation tier or frequency. */
+  detail: string | null;
+  lotusCode: string | null;
+  lotusName: string | null;
+};
+
 export type WooCommerceOrderLotusProduct = {
   catalogProductId: string;
   code: string;
@@ -88,6 +100,8 @@ export type WooCommerceOrderRecord = {
   productId: string | null;
   /** Lotus products from manual assignment and/or mapped WC line items. */
   lotusProducts: WooCommerceOrderLotusProduct[];
+  /** Extra line text for the orders list: event title, line notes, line mapping. */
+  lineContext: WooCommerceOrderLineContext[];
   linkedStripeTransactions: LinkedStripeTransactionSummary[];
   syncedAt: string;
   createdAt: string;
@@ -253,6 +267,7 @@ function rowToRecord(
     memberName: member?.name ?? null,
     productId: row.productId,
     lotusProducts: [],
+    lineContext: [],
     linkedStripeTransactions: [],
     syncedAt: row.syncedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
@@ -608,7 +623,9 @@ export async function listWooCommerceOrdersFromDb(
       ),
     ),
   );
-  const orders = await attachStripeLinksToOrders(ordersWithLotus);
+  const orders = await attachOrderLineContext(
+    await attachStripeLinksToOrders(ordersWithLotus),
+  );
 
   return {
     configured: isWooCommerceConfigured(),
@@ -648,6 +665,183 @@ export async function getWooCommerceOrderById(
     }),
   ]);
   return order ?? null;
+}
+
+function eventTitleFromPermalink(permalink: string | null): string | null {
+  if (!permalink) return null;
+  let pathname = permalink;
+  try {
+    pathname = new URL(permalink).pathname;
+  } catch {
+    return null;
+  }
+  const parts = pathname.split("/").filter(Boolean);
+  const whatsOn = parts.lastIndexOf("whats-on");
+  const slug =
+    whatsOn >= 0 && parts[whatsOn + 1]
+      ? parts[whatsOn + 1]
+      : parts[parts.length - 1];
+  if (!slug) return null;
+  const words = slug
+    .replace(/-(\d{1,2})$/, "")
+    .replace(/-/g, " ")
+    .trim();
+  if (words.length < 3) return null;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function sameLabel(a: string | null | undefined, b: string | null | undefined) {
+  const left = a?.trim().toLowerCase() ?? "";
+  const right = b?.trim().toLowerCase() ?? "";
+  return left.length > 0 && left === right;
+}
+
+async function attachOrderLineContext(
+  orders: WooCommerceOrderRecord[],
+): Promise<WooCommerceOrderRecord[]> {
+  if (orders.length === 0) return orders;
+
+  const wcProductIds = new Set<number>();
+  for (const order of orders) {
+    for (const line of order.lineItems) {
+      if (line.productId != null && line.productId > 0) {
+        wcProductIds.add(line.productId);
+      }
+    }
+  }
+
+  const db = getDb();
+  const [productRows, detailRows] = await Promise.all([
+    wcProductIds.size > 0
+      ? db
+          .select({
+            wcProductId: woocommerceProducts.wcProductId,
+            name: woocommerceProducts.name,
+            permalink: woocommerceProducts.permalink,
+            lotusCode: products.code,
+            lotusName: products.name,
+          })
+          .from(woocommerceProducts)
+          .leftJoin(products, eq(woocommerceProducts.productId, products.id))
+          .where(
+            inArray(woocommerceProducts.wcProductId, [...wcProductIds]),
+          )
+      : Promise.resolve([]),
+    db.execute<{
+      order_id: string;
+      line_id: number;
+      detail: string | null;
+    }>(sql`
+      select
+        o.id as order_id,
+        (line.elem->>'id')::int as line_id,
+        (
+          select string_agg(
+            coalesce(m.elem->>'display_key', m.elem->>'key') || ': ' || left(
+              coalesce(
+                m.elem->>'display_value',
+                case
+                  when jsonb_typeof(m.elem->'value') = 'string' then m.elem->>'value'
+                  else null
+                end
+              ),
+              80
+            ),
+            ' · '
+          )
+          from jsonb_array_elements(coalesce(line.elem->'meta_data', '[]'::jsonb)) as m(elem)
+          where coalesce(m.elem->>'key', '') not like '\\_%'
+            and length(
+              coalesce(
+                m.elem->>'display_value',
+                case
+                  when jsonb_typeof(m.elem->'value') = 'string' then m.elem->>'value'
+                  else ''
+                end
+              )
+            ) > 0
+        ) as detail
+      from ${woocommerceOrders} as o,
+      lateral jsonb_array_elements(coalesce(o.wc_raw->'line_items', '[]'::jsonb)) as line(elem)
+      where o.id in (${sql.join(
+        orders.map((order) => sql`${order.id}::uuid`),
+        sql`, `,
+      )})
+    `),
+  ]);
+
+  const byWcProductId = new Map(
+    productRows.map((row) => [row.wcProductId, row]),
+  );
+  const detailList = Array.isArray(detailRows) ? detailRows : [];
+  const detailByOrderLine = new Map<string, string>();
+  for (const row of detailList) {
+    if (!row.detail) continue;
+    detailByOrderLine.set(`${row.order_id}:${row.line_id}`, row.detail);
+  }
+
+  return orders.map((order) => ({
+    ...order,
+    lineContext: order.lineItems.map((line) => {
+      const product =
+        line.productId != null && line.productId > 0
+          ? byWcProductId.get(line.productId)
+          : undefined;
+      const catalogName =
+        product && !sameLabel(product.name, line.name) ? product.name : null;
+      const eventTitle = eventTitleFromPermalink(product?.permalink ?? null);
+      const showEvent =
+        eventTitle != null &&
+        !sameLabel(eventTitle, line.name) &&
+        !sameLabel(eventTitle, catalogName) &&
+        !sameLabel(eventTitle, product?.name);
+      return {
+        lineId: line.id,
+        catalogName,
+        eventTitle: showEvent ? eventTitle : null,
+        detail: detailByOrderLine.get(`${order.id}:${line.id}`) ?? null,
+        lotusCode: product?.lotusCode ?? null,
+        lotusName: product?.lotusName ?? null,
+      };
+    }),
+  }));
+}
+
+export async function bulkSetWooCommerceOrderLotusProducts(
+  orderIds: string[],
+  productId: string,
+): Promise<{ updated: number; skipped: number }> {
+  const ids = [...new Set(orderIds.map((id) => id.trim()).filter(Boolean))].slice(
+    0,
+    100,
+  );
+  if (ids.length === 0) {
+    return { updated: 0, skipped: 0 };
+  }
+
+  const db = getDb();
+  const [catalogProduct] = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(eq(products.id, productId))
+    .limit(1);
+  if (!catalogProduct) {
+    throw new Error("Lotus product not found");
+  }
+
+  const updated = await db
+    .update(woocommerceOrders)
+    .set({ productId, updatedAt: new Date() })
+    .where(
+      and(
+        inArray(woocommerceOrders.id, ids),
+        isNull(woocommerceOrders.productId),
+        sql`not (${orderHasMappedLotusProduct})`,
+      ),
+    )
+    .returning({ id: woocommerceOrders.id });
+
+  return { updated: updated.length, skipped: ids.length - updated.length };
 }
 
 export async function setWooCommerceOrderLotusProduct(

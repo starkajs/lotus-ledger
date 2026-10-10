@@ -21,6 +21,17 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-wc-order-lines",
+    shipped: "2026-10-10",
+    title: "Richer WooCommerce order lines, and bulk assign",
+    changes: [
+      "Each order line shows the course or event title, donation tier or frequency when the shop recorded them, and the SKU.",
+      "Unmapped orders can be selected and assigned a Lotus product, the same way as Stripe transactions.",
+    ],
+    commit: "",
+    parent: "7b729a8f0b9987926375af91c7178d69d3347a2a",
+  },
+  {
     id: "2026-10-10-wc-ordered-unlinked",
     shipped: "2026-10-10",
     title: "WooCommerce products waiting to be mapped",

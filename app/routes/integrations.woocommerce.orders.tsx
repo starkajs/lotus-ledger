@@ -1,8 +1,9 @@
-import { Fragment } from "react";
-import { Form, Link, useLocation } from "react-router";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Form, Link, redirect, useLocation } from "react-router";
 import type { Route } from "./+types/integrations.woocommerce.orders";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
+import { WooCommerceOrdersBulkAssignForm } from "~/components/woocommerce-orders-bulk-assign-form";
 import { formatWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
 import { formatCalendarDateShort } from "~/lib/date-range-filters";
 import {
@@ -14,7 +15,9 @@ import {
   wooCommerceOrdersHref,
   type WooCommerceOrderListFilters,
 } from "~/lib/woocommerce-orders-filters";
+import { listProducts } from "~/lib/products.server";
 import {
+  bulkSetWooCommerceOrderLotusProducts,
   listDistinctWooCommerceOrderStatuses,
   listWooCommerceOrdersFromDb,
   type WooCommerceOrderRecord,
@@ -126,14 +129,19 @@ function LotusProductsCell({ order }: { order: WooCommerceOrderRecord }) {
   );
 }
 
+function orderNeedsLotusProduct(order: WooCommerceOrderRecord) {
+  return order.lotusProducts.length === 0;
+}
+
 function OrderLinesRow({ order }: { order: WooCommerceOrderRecord }) {
   const items = order.lineItems;
+  const unmappedOrder = orderNeedsLotusProduct(order);
   if (items.length === 0) {
     if (!order.lineSummary) return null;
     return (
       <tr className="group border-b border-sand-dark/30 hover:bg-sand/20">
         <td className="px-2 pb-1.5 pt-0" />
-        <td colSpan={9} className="px-2 pb-2 pt-0 text-[10px] text-ink-muted">
+        <td colSpan={10} className="px-2 pb-2 pt-0 text-[10px] text-ink-muted">
           <span className="text-ink-faint">Lines: </span>
           {order.lineSummary}
         </td>
@@ -141,30 +149,58 @@ function OrderLinesRow({ order }: { order: WooCommerceOrderRecord }) {
     );
   }
 
-  const visible = items.slice(0, 4);
+  const contextByLine = new Map(
+    order.lineContext.map((line) => [line.lineId, line]),
+  );
+  const visible = items.slice(0, 8);
   const more = items.length - visible.length;
 
   return (
     <tr className="group border-b border-sand-dark/30 hover:bg-sand/20">
       <td className="px-2 pb-1.5 pt-0" />
-      <td colSpan={9} className="px-2 pb-2 pt-0 text-[10px] text-ink-muted">
-        <span className="text-ink-faint">Lines: </span>
-        {visible.map((item, index) => (
-          <span key={item.id}>
-            {index > 0 && ", "}
-            {item.quantity > 1 ? `${item.quantity}× ` : ""}
-            {item.name}
-            {item.sku ? (
-              <span className="font-mono text-ink-faint" title="SKU">
-                {" "}
-                [{item.sku}]
-              </span>
-            ) : null}
-          </span>
-        ))}
-        {more > 0 && (
-          <span className="text-ink-faint">{` (+${more} more)`}</span>
-        )}
+      <td colSpan={10} className="px-2 pb-2 pt-0">
+        <ul className="space-y-1.5">
+          {visible.map((item) => {
+            const context = contextByLine.get(item.id);
+            return (
+              <li key={item.id} className="text-[11px] leading-snug text-ink-muted">
+                <span className="text-dark">
+                  {item.quantity > 1 ? `${item.quantity}× ` : ""}
+                  {item.name}
+                </span>
+                {context?.catalogName ? (
+                  <span className="mt-0.5 block text-dark">{context.catalogName}</span>
+                ) : null}
+                {context?.eventTitle ? (
+                  <span className="mt-0.5 block text-dark">{context.eventTitle}</span>
+                ) : null}
+                {context?.detail ? (
+                  <span className="mt-0.5 block">{context.detail}</span>
+                ) : null}
+                {item.sku ? (
+                  <span className="mt-0.5 block font-mono text-[10px] text-ink-faint">
+                    SKU {item.sku}
+                  </span>
+                ) : null}
+                {context?.lotusCode ? (
+                  <span
+                    className="mt-0.5 block font-mono text-[10px] text-teal"
+                    title={context.lotusName ?? undefined}
+                  >
+                    {context.lotusCode}
+                  </span>
+                ) : unmappedOrder ? (
+                  <span className="mt-0.5 block text-[10px] font-medium text-maroon">
+                    Not mapped
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+        {more > 0 ? (
+          <p className="mt-1 text-[10px] text-ink-faint">+{more} more lines</p>
+        ) : null}
       </td>
     </tr>
   );
@@ -207,7 +243,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
   const parsed = parseWooCommerceOrderFiltersFromUrl(url.searchParams);
 
-  const [list, statuses] = await Promise.all([
+  const [list, statuses, catalogProducts] = await Promise.all([
     listWooCommerceOrdersFromDb({
       page,
       status: parsed.status,
@@ -218,6 +254,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       stripeLinked: parsed.stripeLinked,
     }),
     listDistinctWooCommerceOrderStatuses(),
+    listProducts({ activeOnly: true }),
   ]);
 
   const status =
@@ -230,13 +267,56 @@ export async function loader({ request }: Route.LoaderArgs) {
     statuses,
     ...parsed,
     status,
+    catalogProducts,
+    bulkAssigned: url.searchParams.get("bulkAssigned"),
+    bulkSkipped: url.searchParams.get("bulkSkipped"),
   };
 }
 
 export async function action({ request }: Route.ActionArgs) {
   const user = await requireUser(request);
+  const url = new URL(request.url);
   const form = await request.formData();
-  if (form.get("intent") !== "sync") {
+  const intent = String(form.get("intent") ?? "");
+
+  if (intent === "bulk-assign-product") {
+    const orderIds = form.getAll("orderIds").map((value) => String(value));
+    const productId = String(form.get("productId") ?? "").trim();
+    if (!productId) {
+      return {
+        scope: "bulk-assign-product" as const,
+        error: "Choose a Lotus product",
+      };
+    }
+    if (orderIds.length === 0) {
+      return {
+        scope: "bulk-assign-product" as const,
+        error: "Select at least one order",
+      };
+    }
+    try {
+      const result = await bulkSetWooCommerceOrderLotusProducts(
+        orderIds,
+        productId,
+      );
+      const params = new URLSearchParams(url.searchParams);
+      params.set("bulkAssigned", String(result.updated));
+      if (result.skipped > 0) {
+        params.set("bulkSkipped", String(result.skipped));
+      } else {
+        params.delete("bulkSkipped");
+      }
+      const query = params.toString();
+      return redirect(query ? `${url.pathname}?${query}` : url.pathname);
+    } catch (err) {
+      return {
+        scope: "bulk-assign-product" as const,
+        error: err instanceof Error ? err.message : "Bulk assign failed",
+      };
+    }
+  }
+
+  if (intent !== "sync") {
     return { scope: "sync" as const, error: "Unknown action" };
   }
   try {
@@ -277,7 +357,56 @@ export default function WooCommerceOrdersPage({
     lotusProductMissing,
     stripeSearch,
     stripeLinked,
+    catalogProducts,
+    bulkAssigned,
+    bulkSkipped,
   } = loaderData;
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  const selectableIds = useMemo(
+    () => orders.filter(orderNeedsLotusProduct).map((order) => order.id),
+    [orders],
+  );
+  const allSelectableOnPageSelected =
+    selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  const someSelectableOnPageSelected = selectableIds.some((id) =>
+    selected.has(id),
+  );
+  const selectedOrderIds = useMemo(
+    () => selectableIds.filter((id) => selected.has(id)),
+    [selectableIds, selected],
+  );
+
+  useEffect(() => {
+    const input = selectAllRef.current;
+    if (!input) return;
+    input.indeterminate =
+      someSelectableOnPageSelected && !allSelectableOnPageSelected;
+  }, [someSelectableOnPageSelected, allSelectableOnPageSelected]);
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllSelectableOnPage() {
+    setSelected((prev) => {
+      const allSelected =
+        selectableIds.length > 0 &&
+        selectableIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const id of selectableIds) next.delete(id);
+      } else {
+        for (const id of selectableIds) next.add(id);
+      }
+      return next;
+    });
+  }
 
   const listFilters: WooCommerceOrderListFilters = {
     status,
@@ -304,6 +433,10 @@ export default function WooCommerceOrdersPage({
     actionData?.scope === "sync" && actionData.success ? actionData.result : null;
   const syncError =
     actionData?.scope === "sync" && actionData.error ? actionData.error : null;
+  const bulkAssignError =
+    actionData?.scope === "bulk-assign-product" && actionData.error
+      ? actionData.error
+      : null;
 
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const rangeEnd = Math.min(page * pageSize, total);
@@ -354,6 +487,20 @@ export default function WooCommerceOrdersPage({
           {syncError && (
             <p className="mb-3 text-sm text-maroon" role="alert">
               {syncError}
+            </p>
+          )}
+          {bulkAssignError && (
+            <p className="mb-3 text-sm text-maroon" role="alert">
+              {bulkAssignError}
+            </p>
+          )}
+          {bulkAssigned && (
+            <p className="mb-3 text-sm text-jade" role="status">
+              Assigned a Lotus product to {bulkAssigned} order
+              {bulkAssigned === "1" ? "" : "s"}.
+              {bulkSkipped && bulkSkipped !== "0"
+                ? ` ${bulkSkipped} skipped because they were already mapped.`
+                : ""}
             </p>
           )}
           {syncResult && (
@@ -432,10 +579,27 @@ export default function WooCommerceOrdersPage({
             </p>
           ) : (
             <>
+              <WooCommerceOrdersBulkAssignForm
+                selectedCount={selectedOrderIds.length}
+                selectedOrderIds={selectedOrderIds}
+                catalogProducts={catalogProducts}
+                postAction={postAction}
+              />
               <div className="mt-3 overflow-x-auto rounded-jamyang border border-sand-dark/50">
                 <table className="w-full min-w-[54rem] text-left text-xs">
                   <thead className="bg-surface text-dark">
                     <tr>
+                      <th className="px-2 py-1.5">
+                        <input
+                          ref={selectAllRef}
+                          type="checkbox"
+                          checked={allSelectableOnPageSelected}
+                          onChange={toggleAllSelectableOnPage}
+                          disabled={selectableIds.length === 0}
+                          aria-label="Select all unmapped orders on this page"
+                          className="rounded border-sand-dark/60"
+                        />
+                      </th>
                       <th className="px-2 py-1.5 font-medium">Date</th>
                       <th className="px-2 py-1.5 font-medium">Order</th>
                       <th className="px-2 py-1.5 font-medium">Stripe</th>
@@ -451,9 +615,25 @@ export default function WooCommerceOrdersPage({
                     </tr>
                   </thead>
                   <tbody className="bg-surface-overlay">
-                    {orders.map((order) => (
+                    {orders.map((order) => {
+                      const canSelect = orderNeedsLotusProduct(order);
+                      const isSelected = selected.has(order.id);
+                      return (
                       <Fragment key={order.id}>
-                        <tr className="group align-top border-b border-sand-dark/30 hover:bg-sand/20">
+                        <tr
+                          className={`group align-top border-b border-sand-dark/30 hover:bg-sand/20 ${isSelected ? "bg-teal/5 hover:bg-teal/10" : ""}`}
+                        >
+                          <td className="px-2 py-1.5">
+                            {canSelect ? (
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleOne(order.id)}
+                                aria-label={`Select order ${order.orderNumber ?? order.wcOrderId}`}
+                                className="rounded border-sand-dark/60"
+                              />
+                            ) : null}
+                          </td>
                           <td className="px-2 py-1.5 whitespace-nowrap text-ink-muted">
                             {formatCalendarDateShort(order.dateCreated)}
                           </td>
@@ -513,7 +693,8 @@ export default function WooCommerceOrdersPage({
                         </tr>
                         <OrderLinesRow order={order} />
                       </Fragment>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
