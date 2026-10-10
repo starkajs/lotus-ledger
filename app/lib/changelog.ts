@@ -28,7 +28,7 @@ export const changelog: ChangelogEntry[] = [
       "WooCommerce orders can be filtered by a Lotus product, and by an amount from and amount to.",
       "The sales by product page uses the same filters.",
     ],
-    commit: "",
+    commit: "446daf8ee93a7432d944078ba28b8004bc774a31",
     parent: "170b0174ea8fa6cbd9fb9c2847e48c716206f87b",
   },
   {
