@@ -21,6 +21,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-wc-stripe-no-charge",
+    shipped: "2026-10-10",
+    title: "WooCommerce orders with no Stripe charge",
+    changes: [
+      "The WooCommerce to Stripe reconciliation lists failed, pending, and cancelled orders separately, because those payments never became a Stripe charge.",
+    ],
+    commit: "",
+    parent: "606ba91f447b7c334c2b874b3a92ab2a6438ebfc",
+  },
+  {
     id: "2026-10-10-wc-order-amount-cast",
     shipped: "2026-10-10",
     title: "WooCommerce amount filter",

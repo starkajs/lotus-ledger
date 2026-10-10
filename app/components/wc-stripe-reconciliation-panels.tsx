@@ -288,20 +288,73 @@ function Panel({
   );
 }
 
+function OrdersByStatus({
+  groups,
+  returnTo,
+}: {
+  groups: WcStripeReconciliationByStatus[];
+  returnTo: string;
+}) {
+  return (
+    <>
+      {groups.map((group) => (
+        <div
+          key={group.status}
+          className="overflow-hidden rounded-jamyang border border-sand-dark/40"
+        >
+          <div className="border-b border-sand-dark/40 bg-surface px-3 py-2 sm:px-4">
+            <h3 className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+              {group.status}
+              <span className="ml-1.5 font-normal normal-case text-ink-faint">
+                ({group.orders.length} order
+                {group.orders.length === 1 ? "" : "s"})
+              </span>
+            </h3>
+            <div className="mt-2">
+              <MatchedWcOrderTotals
+                totals={group.wcTotals}
+                className="mb-0 border-0 bg-transparent px-0 py-0"
+              />
+            </div>
+          </div>
+          <ul className="divide-y divide-sand-dark/25 bg-surface-overlay">
+            {group.orders.map((order) => (
+              <li key={order.id} className="px-3 py-2 text-sm">
+                <OrderSummary order={order} returnTo={returnTo} />
+                {order.orderKey && (
+                  <span className="mt-0.5 block font-mono text-[10px] text-ink-faint">
+                    {order.orderKey}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function WcStripeReconciliationPanels({
   matched,
   unmatchedWcByStatus,
   unmatchedWcByProduct,
+  noStripeChargeByStatus,
   unmatchedStripeByProduct,
   returnTo,
 }: {
   matched: WcStripeMatchedPair[];
   unmatchedWcByStatus: WcStripeReconciliationByStatus[];
   unmatchedWcByProduct: WcStripeReconciliationWcByProduct[];
+  noStripeChargeByStatus: WcStripeReconciliationByStatus[];
   unmatchedStripeByProduct: WcStripeReconciliationByProduct[];
   returnTo: string;
 }) {
   const unmatchedWcCount = unmatchedWcByStatus.reduce(
+    (n, g) => n + g.orders.length,
+    0,
+  );
+  const noStripeChargeCount = noStripeChargeByStatus.reduce(
     (n, g) => n + g.orders.length,
     0,
   );
@@ -310,6 +363,7 @@ export function WcStripeReconciliationPanels({
     0,
   );
   const allUnmatchedWc = unmatchedWcByStatus.flatMap((g) => g.orders);
+  const allNoStripeCharge = noStripeChargeByStatus.flatMap((g) => g.orders);
   const allUnmatchedStripe = unmatchedStripeByProduct.flatMap(
     (g) => g.transactions,
   );
@@ -318,12 +372,14 @@ export function WcStripeReconciliationPanels({
   const matchedWcTotals = sumMatchedWcOrderTotals(matched);
   const matchedByProduct = groupMatchedByProduct(matched);
   const unmatchedWcTotals = sumWcOrders(allUnmatchedWc);
+  const noStripeChargeTotals = sumWcOrders(allNoStripeCharge);
   const unmatchedStripeTotals = sumStripeTransactions(allUnmatchedStripe);
 
   const summaryRows = buildReconciliationSummaryRows({
     matched,
     unmatchedWcByStatus,
     unmatchedWcByProduct,
+    noStripeChargeByStatus,
     unmatchedStripeByProduct,
   });
 
@@ -405,10 +461,12 @@ export function WcStripeReconciliationPanels({
       <Panel
         title="WooCommerce — not matched"
         count={unmatchedWcCount}
-        description="Orders in this period with no Stripe transaction in the same period linked to them. Listed by status; summary uses Lotus product."
+        description="Paid or completed orders in this period with no Stripe transaction in the same period. These are the ones to look up in Stripe."
       >
         {unmatchedWcCount === 0 ? (
-          <p className="text-sm text-ink-muted">All WC orders in range are matched.</p>
+          <p className="text-sm text-ink-muted">
+            No paid orders are missing a Stripe transaction.
+          </p>
         ) : (
           <div className="space-y-4">
             <section className="overflow-hidden rounded-jamyang border border-sand-dark/40">
@@ -424,40 +482,36 @@ export function WcStripeReconciliationPanels({
                 <MatchedWcOrderTotals totals={unmatchedWcTotals} />
               </div>
             </section>
-            {unmatchedWcByStatus.map((group) => (
-              <div
-                key={group.status}
-                className="overflow-hidden rounded-jamyang border border-sand-dark/40"
-              >
-                <div className="border-b border-sand-dark/40 bg-surface px-3 py-2 sm:px-4">
-                  <h3 className="text-xs font-medium uppercase tracking-wide text-ink-muted">
-                    {group.status}
-                    <span className="ml-1.5 font-normal normal-case text-ink-faint">
-                      ({group.orders.length} order
-                      {group.orders.length === 1 ? "" : "s"})
-                    </span>
-                  </h3>
-                  <div className="mt-2">
-                    <MatchedWcOrderTotals
-                      totals={group.wcTotals}
-                      className="mb-0 border-0 bg-transparent px-0 py-0"
-                    />
-                  </div>
-                </div>
-                <ul className="divide-y divide-sand-dark/25 bg-surface-overlay">
-                  {group.orders.map((order) => (
-                    <li key={order.id} className="px-3 py-2 text-sm">
-                      <OrderSummary order={order} returnTo={returnTo} />
-                      {order.orderKey && (
-                        <span className="mt-0.5 block font-mono text-[10px] text-ink-faint">
-                          {order.orderKey}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+            <OrdersByStatus groups={unmatchedWcByStatus} returnTo={returnTo} />
+          </div>
+        )}
+      </Panel>
+
+      <Panel
+        title="WooCommerce — no Stripe charge"
+        count={noStripeChargeCount}
+        description="Failed, pending, and cancelled orders. The payment did not complete, so Stripe has no balance transaction to look up."
+      >
+        {noStripeChargeCount === 0 ? (
+          <p className="text-sm text-ink-muted">
+            No failed, pending, or cancelled orders in this period.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <section className="overflow-hidden rounded-jamyang border border-sand-dark/40">
+              <div className="bg-surface px-3 py-2 sm:px-4">
+                <h3 className="text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                  All orders with no Stripe charge
+                </h3>
               </div>
-            ))}
+              <div className="border-b border-sand-dark/40 bg-surface/60 px-3 py-3 sm:px-4">
+                <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                  WooCommerce
+                </p>
+                <MatchedWcOrderTotals totals={noStripeChargeTotals} />
+              </div>
+            </section>
+            <OrdersByStatus groups={noStripeChargeByStatus} returnTo={returnTo} />
           </div>
         )}
       </Panel>

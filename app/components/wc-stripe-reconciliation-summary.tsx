@@ -26,6 +26,8 @@ export type SummaryRow = {
   stripeTotals: CurrencyTotals[];
   wcTotals: WcOrderTotals[];
   isSectionTotal?: boolean;
+  /** Status names and other labels that are not Lotus products. */
+  plainLabel?: boolean;
 };
 
 function ProductLabel({
@@ -114,6 +116,7 @@ export function buildReconciliationSummaryRows(input: {
   matched: WcStripeMatchedPair[];
   unmatchedWcByStatus: WcStripeReconciliationByStatus[];
   unmatchedWcByProduct: WcStripeReconciliationWcByProduct[];
+  noStripeChargeByStatus: WcStripeReconciliationByStatus[];
   unmatchedStripeByProduct: WcStripeReconciliationByProduct[];
 }): SummaryRow[] {
   const rows: SummaryRow[] = [];
@@ -187,6 +190,30 @@ export function buildReconciliationSummaryRows(input: {
     });
   }
 
+  for (const group of input.noStripeChargeByStatus) {
+    rows.push({
+      section: "WC — no Stripe charge",
+      groupLabel: group.status,
+      productCode: null,
+      count: group.orders.length,
+      stripeTotals: [],
+      wcTotals: group.wcTotals,
+      plainLabel: true,
+    });
+  }
+  const allNoStripeCharge = input.noStripeChargeByStatus.flatMap((g) => g.orders);
+  if (allNoStripeCharge.length > 0) {
+    rows.push({
+      section: "WC — no Stripe charge",
+      groupLabel: "Section total",
+      productCode: null,
+      count: allNoStripeCharge.length,
+      stripeTotals: [],
+      wcTotals: sumWcOrders(allNoStripeCharge),
+      isSectionTotal: true,
+    });
+  }
+
   for (const group of input.unmatchedStripeByProduct) {
     rows.push({
       section: "Stripe — not matched",
@@ -229,8 +256,9 @@ export function WcStripeReconciliationSummaryTable({
       <header className="border-b border-sand-dark/40 px-4 py-3 sm:px-6">
         <h2 className="text-sm font-medium text-dark">Summary</h2>
         <p className="mt-1 text-xs text-ink-muted">
-          Totals by section and Lotus product (or WC status grouping in detail
-          views). Stripe amounts are gross, fee, and net.
+          Paid orders with no Stripe link are WC — not matched. Failed, pending,
+          and cancelled orders are WC — no Stripe charge. Stripe amounts are
+          gross, fee, and net.
         </p>
       </header>
       <table className="w-full min-w-[56rem] text-left text-xs">
@@ -262,8 +290,10 @@ export function WcStripeReconciliationSummaryTable({
                   {showSection ? row.section : ""}
                 </td>
                 <td className="px-3 py-2">
-                  {row.isSectionTotal ? (
-                    <span className="text-ink-muted">{row.groupLabel}</span>
+                  {row.isSectionTotal || row.plainLabel ? (
+                    <span className={row.isSectionTotal ? "text-ink-muted" : "text-dark"}>
+                      {row.groupLabel}
+                    </span>
                   ) : (
                     <ProductLabel code={row.productCode} name={row.groupLabel} />
                   )}

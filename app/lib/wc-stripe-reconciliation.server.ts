@@ -85,15 +85,31 @@ export type WcStripeReconciliationData = {
   matched: WcStripeMatchedPair[];
   unmatchedWcByStatus: WcStripeReconciliationByStatus[];
   unmatchedWcByProduct: WcStripeReconciliationWcByProduct[];
+  /** Failed, pending, or cancelled orders. No Stripe balance transaction exists. */
+  noStripeChargeByStatus: WcStripeReconciliationByStatus[];
   unmatchedStripeByProduct: WcStripeReconciliationByProduct[];
   counts: {
     wcOrders: number;
     stripeTransactions: number;
     matched: number;
     unmatchedWc: number;
+    noStripeCharge: number;
     unmatchedStripe: number;
   };
 };
+
+/** Shop statuses where the customer did not pay, so Stripe has nothing to match. */
+const WC_STATUSES_WITHOUT_STRIPE_CHARGE = new Set([
+  "failed",
+  "pending",
+  "cancelled",
+  "canceled",
+  "checkout-draft",
+]);
+
+export function wcOrderHasNoStripeCharge(status: string): boolean {
+  return WC_STATUSES_WITHOUT_STRIPE_CHARGE.has(status.trim().toLowerCase());
+}
 
 function wcDateWhere(dateFrom: IsoDateString, dateTo: IsoDateString) {
   return and(
@@ -273,6 +289,7 @@ export async function loadWcStripeReconciliation(input: {
 
   const matched: WcStripeMatchedPair[] = [];
   const unmatchedWc: WcStripeReconciliationOrder[] = [];
+  const noStripeCharge: WcStripeReconciliationOrder[] = [];
   const unmatchedStripe: WcStripeReconciliationStripe[] = [];
   const matchedStripeIds = new Set<string>();
 
@@ -285,6 +302,8 @@ export async function loadWcStripeReconciliation(input: {
       for (const tx of linked) {
         matchedStripeIds.add(tx.id);
       }
+    } else if (wcOrderHasNoStripeCharge(order.status)) {
+      noStripeCharge.push(order);
     } else {
       unmatchedWc.push(order);
     }
@@ -300,12 +319,14 @@ export async function loadWcStripeReconciliation(input: {
     matched,
     unmatchedWcByStatus: groupUnmatchedWcByStatus(unmatchedWc),
     unmatchedWcByProduct: groupUnmatchedWcByProduct(unmatchedWc),
+    noStripeChargeByStatus: groupUnmatchedWcByStatus(noStripeCharge),
     unmatchedStripeByProduct: groupUnmatchedStripeByProduct(unmatchedStripe),
     counts: {
       wcOrders: orders.length,
       stripeTransactions: stripeTransactions.length,
       matched: matched.length,
       unmatchedWc: unmatchedWc.length,
+      noStripeCharge: noStripeCharge.length,
       unmatchedStripe: unmatchedStripe.length,
     },
   };

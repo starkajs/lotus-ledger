@@ -20,7 +20,7 @@ const reconciliations = [
     to: "/reconciliations/wc-stripe",
     title: "WooCommerce ↔ Stripe",
     description:
-      "Compare synced WC orders and Stripe balance transactions in a date range. See matched pairs, unmatched orders by status, and unmatched Stripe by Lotus product.",
+      "Compare synced WC orders and Stripe balance transactions in a date range. Paid orders missing a Stripe transaction are separate from failed, pending, and cancelled orders, which have no Stripe charge.",
   },
   {
     to: "/reconciliations/stripe-qb",

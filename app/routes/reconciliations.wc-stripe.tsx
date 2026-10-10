@@ -95,7 +95,8 @@ export default function WcStripeReconciliationPage({
               {data.counts.stripeTransactions} Stripe transaction
               {data.counts.stripeTransactions === 1 ? "" : "s"} ·{" "}
               {data.counts.matched} matched · {data.counts.unmatchedWc} WC
-              unmatched · {data.counts.unmatchedStripe} Stripe unmatched
+              unmatched · {data.counts.noStripeCharge} WC with no Stripe charge ·{" "}
+              {data.counts.unmatchedStripe} Stripe unmatched
               <span className="ml-2">
                 <Link
                   to={reconciliationHref(PAGE_PATH, { dateFrom, dateTo, period })}
@@ -112,6 +113,7 @@ export default function WcStripeReconciliationPage({
               matched={data.matched}
               unmatchedWcByStatus={data.unmatchedWcByStatus}
               unmatchedWcByProduct={data.unmatchedWcByProduct}
+              noStripeChargeByStatus={data.noStripeChargeByStatus}
               unmatchedStripeByProduct={data.unmatchedStripeByProduct}
               returnTo={returnTo}
             />
