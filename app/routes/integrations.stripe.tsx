@@ -21,6 +21,7 @@ import {
   fetchStripeTransactions,
   type StripeTransactionSummary,
 } from "~/lib/stripe-transactions.server";
+import { refreshAllStripe } from "~/lib/stripe-refresh-all.server";
 import { adminPermissionError, isAdmin, requireUser } from "~/lib/session.server";
 
 export function meta({}: Route.MetaArgs) {
@@ -163,6 +164,14 @@ export async function action({ request }: Route.ActionArgs) {
     throw redirect(`/integrations/stripe?account=${connectionId}`);
   }
 
+  if (intent === "refresh-all") {
+    const steps = await refreshAllStripe({
+      triggeredBy: "app",
+      userId: user.id,
+    });
+    return { scope: "refresh-all" as const, steps };
+  }
+
   if (intent === "sync-payment-methods") {
     try {
       await syncQuickBooksPaymentMethods({
@@ -255,6 +264,45 @@ export default function StripeIntegration({
       title="Stripe accounts"
       description="Add secret keys for each Stripe account. Keys are encrypted in the database and never shown again after saving."
     >
+        {connections.length > 0 ? (
+          <section className="mb-6 rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl">Stripe data</h2>
+                <p className="mt-2 max-w-xl text-sm text-ink-muted">
+                  Refresh all pulls balance transactions for every saved
+                  account. The window is the last 30 days, or from the newest
+                  transaction already stored when that is older.
+                </p>
+              </div>
+              <Form method="post">
+                <SubmitButton
+                  intent="refresh-all"
+                  variant="pill"
+                  loadingLabel="Refreshing all…"
+                >
+                  Refresh all
+                </SubmitButton>
+              </Form>
+            </div>
+            {actionData?.scope === "refresh-all" && actionData.steps ? (
+              <ul
+                role="status"
+                className="mt-4 space-y-1 rounded-jamyang border border-sand-dark/40 bg-surface px-4 py-3 text-sm"
+              >
+                {actionData.steps.map((step) => (
+                  <li
+                    key={step.key}
+                    className={step.ok ? "text-dark" : "text-maroon"}
+                  >
+                    <span className="font-medium">{step.label}:</span>{" "}
+                    {step.ok ? step.detail : step.error}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        ) : null}
         <div className="grid gap-8 lg:grid-cols-[minmax(0,18rem)_1fr]">
           <aside className="space-y-4">
             <h2 className="text-sm font-medium text-dark">Saved accounts</h2>
@@ -306,11 +354,11 @@ export default function StripeIntegration({
                     className="mt-1 w-full rounded-jamyang border border-sand-dark/60 bg-surface-overlay px-3 py-2 text-sm font-mono"
                   />
                 </div>
-                {actionData?.error && (
+                {actionData && "error" in actionData && actionData.error && !("scope" in actionData) ? (
                   <p role="alert" className="text-xs text-maroon">
                     {actionData.error}
                   </p>
-                )}
+                ) : null}
                 <SubmitButton
                   intent="add"
                   variant="primary"

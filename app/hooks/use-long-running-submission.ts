@@ -47,6 +47,15 @@ function messageForIntent(intent: string, pathname: string): string {
     }
     return "Syncing…";
   }
+  if (intent === "refresh-all") {
+    if (pathname.includes("/integrations/woocommerce")) {
+      return "Refreshing all WooCommerce data…";
+    }
+    if (pathname.includes("/integrations/stripe")) {
+      return "Refreshing all Stripe data…";
+    }
+    return "Refreshing all QuickBooks data…";
+  }
   return INTENT_MESSAGES[intent] ?? "Working…";
 }
 

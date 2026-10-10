@@ -1,10 +1,12 @@
-import { Link } from "react-router";
+import { Form, Link } from "react-router";
 import type { Route } from "./+types/integrations.woocommerce";
 import { AppPage } from "~/components/app-page";
+import { SubmitButton } from "~/components/submit-button";
 import { getWooCommerceSiteUrl, isWooCommerceConfigured } from "~/lib/env.server";
 import { countWooCommerceOrders } from "~/lib/woocommerce-orders.server";
 import { countWooCommerceProducts } from "~/lib/woocommerce-products.server";
 import { verifyWooCommerceConnection } from "~/lib/woocommerce-api.server";
+import { refreshAllWooCommerce } from "~/lib/woocommerce-refresh-all.server";
 import { requireUser } from "~/lib/session.server";
 
 export function meta({}: Route.MetaArgs) {
@@ -32,8 +34,28 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
+export async function action({ request }: Route.ActionArgs) {
+  const user = await requireUser(request);
+  const form = await request.formData();
+  if (form.get("intent") !== "refresh-all") {
+    return { scope: "refresh-all" as const, error: "Unknown action" };
+  }
+  if (!isWooCommerceConfigured()) {
+    return {
+      scope: "refresh-all" as const,
+      error: "WooCommerce is not configured.",
+    };
+  }
+  const steps = await refreshAllWooCommerce({
+    triggeredBy: "app",
+    userId: user.id,
+  });
+  return { scope: "refresh-all" as const, steps };
+}
+
 export default function WooCommerceIntegrationPage({
   loaderData,
+  actionData,
 }: Route.ComponentProps) {
   const { configured, siteUrl, verifyOk, verifyError, orderCount, productCount } =
     loaderData;
@@ -91,6 +113,52 @@ export default function WooCommerceIntegrationPage({
             </p>
           </div>
 
+          <section className="mt-4 rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl">WooCommerce data</h2>
+                <p className="mt-2 max-w-xl text-sm text-ink-muted">
+                  Refresh all pulls orders and the product catalog. Orders
+                  cover the last 30 days, or from the newest order already
+                  stored when that is older.
+                </p>
+              </div>
+              <Form method="post">
+                <SubmitButton
+                  intent="refresh-all"
+                  variant="pill"
+                  loadingLabel="Refreshing all…"
+                >
+                  Refresh all
+                </SubmitButton>
+              </Form>
+            </div>
+            {actionData?.scope === "refresh-all" && actionData.error ? (
+              <p
+                role="alert"
+                className="mt-4 rounded-jamyang border border-maroon/30 bg-maroon/5 px-4 py-3 text-sm text-maroon"
+              >
+                {actionData.error}
+              </p>
+            ) : null}
+            {actionData?.scope === "refresh-all" && actionData.steps ? (
+              <ul
+                role="status"
+                className="mt-4 space-y-1 rounded-jamyang border border-sand-dark/40 bg-surface px-4 py-3 text-sm"
+              >
+                {actionData.steps.map((step) => (
+                  <li
+                    key={step.key}
+                    className={step.ok ? "text-dark" : "text-maroon"}
+                  >
+                    <span className="font-medium">{step.label}:</span>{" "}
+                    {step.ok ? step.detail : step.error}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+
           <div className="mt-4 flex flex-wrap gap-3">
             <Link
               to="/integrations/woocommerce/orders"
@@ -107,10 +175,9 @@ export default function WooCommerceIntegrationPage({
           </div>
 
           <p className="mt-6 text-xs text-ink-muted">
-            Sync from each list page or run{" "}
-            <code className="font-mono">npm run sync:woocommerce-orders</code> /{" "}
-            <code className="font-mono">sync:woocommerce-products</code>. Order
-            billing email finds or creates a community member automatically.
+            Order billing email finds or creates a community member
+            automatically. The orders and products pages still have their own
+            sync buttons.
           </p>
         </>
       )}

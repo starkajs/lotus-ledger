@@ -21,6 +21,18 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-stripe-woo-refresh-all",
+    shipped: "2026-10-10",
+    title: "Refresh all for Stripe and WooCommerce",
+    changes: [
+      "Stripe has a Refresh all button. One press pulls balance transactions for every saved account.",
+      "WooCommerce has a Refresh all button. One press pulls orders and the product catalog.",
+      "Orders and Stripe transactions cover the last 30 days, or from the newest row already stored when that is older, up to 90 days.",
+    ],
+    commit: "",
+    parent: "87c1c7368c03d7bf961b97cfd487ca5f616c396a",
+  },
+  {
     id: "2026-10-10-receipt-catchup",
     shipped: "2026-10-10",
     title: "Sales and refund receipt refresh catches up",
