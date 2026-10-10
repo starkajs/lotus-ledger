@@ -8,17 +8,17 @@ import {
   syncQuickBooksPaymentMethods,
 } from "~/lib/quickbooks-master-data.server";
 import { DEFAULT_STRIPE_QB_PAYMENT_REF_TEMPLATE } from "~/lib/stripe-connections-quickbooks.server";
+import { latestIntegrationJobFinishedAt } from "~/lib/integration-jobs.server";
 import { getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
 import {
   createStripeConnection,
   deleteStripeConnection,
   listStripeConnections,
-  verifyStoredStripeConnection,
   type StripeConnectionPublic,
 } from "~/lib/stripe-connections.server";
 import { updateStripeConnectionQuickBooksMapping } from "~/lib/stripe-connections-quickbooks.server";
 import {
-  fetchStripeTransactions,
+  listRecentStoredStripeTransactions,
   type StripeTransactionSummary,
 } from "~/lib/stripe-transactions.server";
 import { refreshAllStripe } from "~/lib/stripe-refresh-all.server";
@@ -33,47 +33,30 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireUser(request);
-  const [connections, qbAccounts, qbPaymentMethods, qbTokens] = await Promise.all([
-    listStripeConnections(),
-    listQuickBooksAccounts(),
-    listQuickBooksPaymentMethods(),
-    getQuickBooksTokens(),
-  ]);
-
   const url = new URL(request.url);
+  const [connections, qbAccounts, qbPaymentMethods, qbTokens, lastSyncedAt] =
+    await Promise.all([
+      listStripeConnections(),
+      listQuickBooksAccounts(),
+      listQuickBooksPaymentMethods(),
+      getQuickBooksTokens(),
+      latestIntegrationJobFinishedAt("stripe_transactions_sync"),
+    ]);
+
+  const requestedId = url.searchParams.get("account");
   const selectedId =
-    url.searchParams.get("account") ?? connections[0]?.id ?? null;
+    (requestedId && connections.some((c) => c.id === requestedId)
+      ? requestedId
+      : null) ??
+    connections[0]?.id ??
+    null;
 
   let transactions: StripeTransactionSummary[] = [];
   let hasMore = false;
-  let livemode = false;
-  let verifyError: string | null = null;
-  let verifyOk = false;
-  let currency: string | undefined;
-  let availableBalance: number | undefined;
-
   if (selectedId) {
-    const verify = await verifyStoredStripeConnection(selectedId);
-    verifyOk = verify.ok;
-    verifyError = verify.error ?? null;
-    currency = verify.currency;
-    availableBalance = verify.availableBalance;
-    livemode = verify.livemode;
-
-    if (verify.ok) {
-      try {
-        const result = await fetchStripeTransactions({
-          connectionId: selectedId,
-          limit: 25,
-        });
-        transactions = result.transactions;
-        hasMore = result.hasMore;
-        livemode = result.livemode;
-      } catch (err) {
-        verifyError =
-          err instanceof Error ? err.message : "Failed to load transactions";
-      }
-    }
+    const recent = await listRecentStoredStripeTransactions(selectedId);
+    transactions = recent.transactions;
+    hasMore = recent.hasMore;
   }
 
   return {
@@ -81,17 +64,21 @@ export async function loader({ request }: Route.LoaderArgs) {
     selectedId,
     transactions,
     hasMore,
-    livemode,
-    verifyOk,
-    verifyError,
-    currency,
-    availableBalance,
+    lastSyncedAt,
     qbConnected: Boolean(qbTokens),
     qbDepositAccounts: qbAccounts.accounts.filter((a) => a.active),
     qbPaymentMethods: qbPaymentMethods.paymentMethods.filter((p) => p.active),
     defaultPaymentRefTemplate: DEFAULT_STRIPE_QB_PAYMENT_REF_TEMPLATE,
     isAdmin: isAdmin(user),
   };
+}
+
+function formatWhen(iso: string | null) {
+  if (!iso) return "Never";
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(iso));
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -245,11 +232,7 @@ export default function StripeIntegration({
     selectedId,
     transactions,
     hasMore,
-    livemode,
-    verifyOk,
-    verifyError,
-    currency,
-    availableBalance,
+    lastSyncedAt,
     qbConnected,
     qbDepositAccounts,
     qbPaymentMethods,
@@ -408,53 +391,36 @@ export default function StripeIntegration({
                   ) : null}
                 </div>
 
-                <div
-                  className={`rounded-jamyang-lg border p-6 ${
-                    verifyOk
-                      ? "border-jade/40 bg-jade/5"
-                      : "border-maroon/30 bg-maroon/5"
-                  }`}
-                >
-                  <h3 className="font-medium text-dark">
-                    {verifyOk ? "Connected" : "Connection failed"}
-                  </h3>
-                  {verifyOk && (
-                    <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
-                      {currency && (
-                        <div>
-                          <dt className="text-ink-faint">Default currency</dt>
-                          <dd className="uppercase text-dark">{currency}</dd>
-                        </div>
-                      )}
-                      {availableBalance != null && currency && (
-                        <div>
-                          <dt className="text-ink-faint">Available balance</dt>
-                          <dd className="text-dark">
-                            {formatMoney(availableBalance, currency)}
-                          </dd>
-                        </div>
-                      )}
+                <div className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-6">
+                  <h3 className="font-medium text-dark">Saved account</h3>
+                  <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+                    {selected.defaultCurrency && (
                       <div>
-                        <dt className="text-ink-faint">Mode</dt>
-                        <dd className="capitalize text-dark">
-                          {livemode ? "Live" : "Test"}
+                        <dt className="text-ink-faint">Default currency</dt>
+                        <dd className="uppercase text-dark">
+                          {selected.defaultCurrency}
                         </dd>
                       </div>
-                      <div>
-                        <dt className="text-ink-faint">Key</dt>
-                        <dd className="font-mono text-dark">
-                          ····{selected.keyLast4}
-                        </dd>
-                      </div>
-                    </dl>
-                  )}
-                  {verifyError && (
-                    <p className="mt-3 text-sm text-maroon">{verifyError}</p>
-                  )}
+                    )}
+                    <div>
+                      <dt className="text-ink-faint">Mode</dt>
+                      <dd className="capitalize text-dark">
+                        {selected.livemode ? "Live" : "Test"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-ink-faint">Key</dt>
+                      <dd className="font-mono text-dark">
+                        ····{selected.keyLast4}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-ink-faint">Last sync</dt>
+                      <dd className="text-dark">{formatWhen(lastSyncedAt)}</dd>
+                    </div>
+                  </dl>
                 </div>
 
-                {verifyOk && (
-                  <>
                     {canManageStripe ? (
                     <div className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-4 sm:p-6">
                       <h3 className="text-sm font-medium text-dark">
@@ -594,7 +560,7 @@ export default function StripeIntegration({
                     ) : null}
 
                     <div className="flex flex-wrap items-center justify-between gap-4">
-                      <h3 className="text-lg">Recent balance transactions</h3>
+                      <h3 className="text-lg">Recent stored transactions</h3>
                       <div className="flex flex-wrap gap-3 text-sm">
                         <Link
                           to={
@@ -621,7 +587,8 @@ export default function StripeIntegration({
 
                     {transactions.length === 0 ? (
                       <p className="text-sm text-ink-muted">
-                        No balance transactions yet for this account.
+                        No stored transactions yet for this account. Refresh
+                        all pulls them from Stripe.
                       </p>
                     ) : (
                       <div className="overflow-x-auto rounded-jamyang-lg border border-sand-dark/50">
@@ -672,11 +639,9 @@ export default function StripeIntegration({
 
                     {hasMore && (
                       <p className="text-sm text-ink-muted">
-                        More transactions available — pagination coming next.
+                        Showing the 25 most recent stored transactions.
                       </p>
                     )}
-                  </>
-                )}
               </>
             )}
           </section>

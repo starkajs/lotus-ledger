@@ -21,6 +21,17 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-stripe-page-load",
+    shipped: "2026-10-10",
+    title: "Stripe page loads from Lotus",
+    changes: [
+      "The Stripe page shows the saved account and recent stored transactions without waiting for Stripe to answer.",
+      "Last sync is the time of the last transaction pull. Refresh all still contacts Stripe.",
+    ],
+    commit: "",
+    parent: "30cd4200c61f7c4ae492818c322c41085186c147",
+  },
+  {
     id: "2026-10-10-woocommerce-page-load",
     shipped: "2026-10-10",
     title: "WooCommerce page loads from Lotus",
