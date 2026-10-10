@@ -4,6 +4,7 @@ import {
   count,
   desc,
   eq,
+  getTableColumns,
   ilike,
   inArray,
   isNotNull,
@@ -209,6 +210,9 @@ export function mapWooCommerceOrder(
     communityMemberId: member.communityMemberId,
   };
 }
+
+const { wcRaw: _listOmitsWcRaw, ...woocommerceOrderListColumns } =
+  getTableColumns(woocommerceOrders);
 
 function rowToRecord(
   row: typeof woocommerceOrders.$inferSelect,
@@ -575,7 +579,7 @@ export async function listWooCommerceOrdersFromDb(
 
   const rows = await db
     .select({
-      order: woocommerceOrders,
+      order: woocommerceOrderListColumns,
       memberEmail: communityMembers.email,
       memberName: communityMembers.name,
     })
@@ -595,10 +599,13 @@ export async function listWooCommerceOrdersFromDb(
 
   const ordersWithLotus = await attachLotusProductsToOrders(
     rows.map((row) =>
-      rowToRecord(row.order, {
-        email: row.memberEmail,
-        name: row.memberName,
-      }),
+      rowToRecord(
+        { ...row.order, wcRaw: null },
+        {
+          email: row.memberEmail,
+          name: row.memberName,
+        },
+      ),
     ),
   );
   const orders = await attachStripeLinksToOrders(ordersWithLotus);

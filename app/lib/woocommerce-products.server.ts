@@ -3,6 +3,7 @@ import {
   asc,
   count,
   eq,
+  getTableColumns,
   ilike,
   inArray,
   isNotNull,
@@ -125,7 +126,7 @@ function lotusLinkFromRow(row: {
 }
 
 function rowToRecord(row: {
-  product: typeof woocommerceProducts.$inferSelect;
+  product: Omit<typeof woocommerceProducts.$inferSelect, "wcRaw">;
   lotusProductCode: string | null;
   lotusProductName: string | null;
 }): WooCommerceProductRecord {
@@ -161,7 +162,16 @@ function rowToRecord(row: {
   };
 }
 
+const { wcRaw: _listOmitsWcRaw, ...woocommerceProductListColumns } =
+  getTableColumns(woocommerceProducts);
+
 const productListSelect = {
+  product: woocommerceProductListColumns,
+  lotusProductCode: products.code,
+  lotusProductName: products.name,
+};
+
+const productDetailSelect = {
   product: woocommerceProducts,
   lotusProductCode: products.code,
   lotusProductName: products.name,
@@ -317,7 +327,7 @@ export async function getWooCommerceProductById(
 ): Promise<WooCommerceProductDetail | null> {
   const db = getDb();
   const [row] = await db
-    .select(productListSelect)
+    .select(productDetailSelect)
     .from(woocommerceProducts)
     .leftJoin(products, eq(woocommerceProducts.productId, products.id))
     .where(eq(woocommerceProducts.id, id))

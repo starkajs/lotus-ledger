@@ -21,6 +21,17 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-woocommerce-page-load",
+    shipped: "2026-10-10",
+    title: "WooCommerce page loads from Lotus",
+    changes: [
+      "The WooCommerce page shows order and product counts and the last sync times without waiting for the shop to answer.",
+      "Order and product lists leave the full shop payload on the detail page.",
+    ],
+    commit: "",
+    parent: "529d63ece836e4157b9dd4d7701c90a2aba70dba",
+  },
+  {
     id: "2026-10-10-sync-gaps",
     shipped: "2026-10-10",
     title: "Syncs fill days that were missed",

@@ -3,9 +3,9 @@ import type { Route } from "./+types/integrations.woocommerce";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
 import { getWooCommerceSiteUrl, isWooCommerceConfigured } from "~/lib/env.server";
+import { latestIntegrationJobFinishedAt } from "~/lib/integration-jobs.server";
 import { countWooCommerceOrders } from "~/lib/woocommerce-orders.server";
 import { countWooCommerceProducts } from "~/lib/woocommerce-products.server";
-import { verifyWooCommerceConnection } from "~/lib/woocommerce-api.server";
 import { refreshAllWooCommerce } from "~/lib/woocommerce-refresh-all.server";
 import { requireUser } from "~/lib/session.server";
 
@@ -20,18 +20,31 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireUser(request);
   const configured = isWooCommerceConfigured();
   const siteUrl = getWooCommerceSiteUrl() ?? null;
-  const verify = configured ? await verifyWooCommerceConnection() : { ok: false };
-  const orderCount = configured ? await countWooCommerceOrders() : 0;
-  const productCount = configured ? await countWooCommerceProducts() : 0;
+  const [orderCount, productCount, ordersSyncedAt, productsSyncedAt] = configured
+    ? await Promise.all([
+        countWooCommerceOrders(),
+        countWooCommerceProducts(),
+        latestIntegrationJobFinishedAt("woocommerce_orders_sync"),
+        latestIntegrationJobFinishedAt("woocommerce_products_sync"),
+      ])
+    : [0, 0, null, null];
 
   return {
     configured,
     siteUrl,
-    verifyOk: verify.ok,
-    verifyError: verify.error ?? null,
     orderCount,
     productCount,
+    ordersSyncedAt,
+    productsSyncedAt,
   };
+}
+
+function formatWhen(iso: string | null) {
+  if (!iso) return "Never";
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(iso));
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -57,8 +70,14 @@ export default function WooCommerceIntegrationPage({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { configured, siteUrl, verifyOk, verifyError, orderCount, productCount } =
-    loaderData;
+  const {
+    configured,
+    siteUrl,
+    orderCount,
+    productCount,
+    ordersSyncedAt,
+    productsSyncedAt,
+  } = loaderData;
 
   return (
     <AppPage
@@ -94,22 +113,16 @@ export default function WooCommerceIntegrationPage({
               </a>
             </p>
             <p className="mt-2 text-ink-muted">
-              API:{" "}
-              {verifyOk ? (
-                <span className="text-jade">Connected</span>
-              ) : (
-                <span className="text-maroon">
-                  {verifyError ?? "Connection check failed"}
-                </span>
-              )}
-            </p>
-            <p className="mt-2 text-ink-muted">
               Orders in Lotus Ledger:{" "}
               <span className="font-medium text-dark">{orderCount}</span>
+              {" · "}
+              last sync {formatWhen(ordersSyncedAt)}
             </p>
             <p className="mt-2 text-ink-muted">
               Products in Lotus Ledger:{" "}
               <span className="font-medium text-dark">{productCount}</span>
+              {" · "}
+              last sync {formatWhen(productsSyncedAt)}
             </p>
           </div>
 
