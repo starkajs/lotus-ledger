@@ -37,4 +37,9 @@ COPY ./scripts/db-migrate.mjs ./scripts/check-drizzle-migrations.mjs ./scripts/s
 COPY ./scripts/lib/integrations-cron-notify.ts /app/scripts/lib/
 COPY ./crontab /app/crontab
 WORKDIR /app
+# The node user ships with the image. Legacy QuickBooks token files are
+# ignored when .data is missing, so the process does not need to write here.
+RUN chown -R node:node /app /home/node
+ENV HOME=/home/node
+USER node
 CMD ["npm", "run", "start"]

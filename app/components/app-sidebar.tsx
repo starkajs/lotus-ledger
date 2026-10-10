@@ -65,6 +65,7 @@ const navItems: NavItem[] = [
   { to: "/integrations/jobs", label: "Job history" },
   { to: "/changelog", label: "Changelog" },
   { to: "/users", label: "Users" },
+  { to: "/sign-ins", label: "Sign-ins" },
 ];
 
 function navClassName({
@@ -90,7 +91,11 @@ export function AppSidebar({ user }: { user: AuthUser }) {
     ? []
     : navItems.filter((item) => {
         if (user.role === "admin") return true;
-        return item.to !== "/users" && item.to !== STRIPE_QB_PUSH_PATH;
+        return (
+          item.to !== "/users" &&
+          item.to !== "/sign-ins" &&
+          item.to !== STRIPE_QB_PUSH_PATH
+        );
       });
 
   return (

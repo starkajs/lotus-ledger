@@ -1,5 +1,5 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { eq, lt } from "drizzle-orm";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { and, desc, eq, lt, lte, ne, or } from "drizzle-orm";
 import { redirect } from "react-router";
 import { getDb } from "~/db";
 import { sessions, users } from "~/db/schema";
@@ -7,9 +7,13 @@ import { recordLoginEvent } from "./auth-audit.server";
 import { getClientIp, getCookie, getUserAgent } from "./http.server";
 import { getOAuthStateSecret } from "./env.server";
 import { safeRedirectPath } from "./redirect";
+import {
+  SESSION_DAYS,
+  sessionIdleCutoff,
+  sessionLifetimeExpired,
+} from "./session-expiry";
 
 const SESSION_COOKIE = "lotus_session";
-const SESSION_DAYS = 30;
 export const PASSWORD_CHANGE_PATH = "/account/password";
 
 export type UserRole = "admin" | "member";
@@ -104,6 +108,59 @@ export async function destroyAllSessionsForUser(userId: string): Promise<void> {
   await db.delete(sessions).where(eq(sessions.userId, userId));
 }
 
+export function getSessionIdFromRequest(request: Request): string | null {
+  const raw = getCookie(request, SESSION_COOKIE);
+  return verifySignedSessionId(raw ? decodeURIComponent(raw) : null);
+}
+
+export async function destroyOtherSessions(
+  userId: string,
+  keepSessionId: string,
+): Promise<number> {
+  const db = getDb();
+  const removed = await db
+    .delete(sessions)
+    .where(and(eq(sessions.userId, userId), ne(sessions.id, keepSessionId)))
+    .returning({ id: sessions.id });
+  return removed.length;
+}
+
+export type UserSessionSummary = {
+  id: string;
+  current: boolean;
+  ipAddress: string | null;
+  userAgent: string | null;
+  lastSeenAt: string;
+  createdAt: string;
+};
+
+export async function listUserSessions(
+  userId: string,
+  currentSessionId: string | null,
+): Promise<UserSessionSummary[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: sessions.id,
+      ipAddress: sessions.ipAddress,
+      userAgent: sessions.userAgent,
+      lastSeenAt: sessions.lastSeenAt,
+      createdAt: sessions.createdAt,
+    })
+    .from(sessions)
+    .where(eq(sessions.userId, userId))
+    .orderBy(desc(sessions.lastSeenAt));
+
+  return rows.map((row) => ({
+    id: row.id,
+    current: row.id === currentSessionId,
+    ipAddress: row.ipAddress,
+    userAgent: row.userAgent,
+    lastSeenAt: row.lastSeenAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+  }));
+}
+
 export async function destroyUserSession(
   request: Request,
   options?: { recordLogout?: boolean; user?: AuthUser | null },
@@ -137,8 +194,7 @@ async function touchSession(sessionId: string): Promise<void> {
 export async function getUserFromRequest(
   request: Request,
 ): Promise<AuthUser | null> {
-  const raw = getCookie(request, SESSION_COOKIE);
-  const sessionId = verifySignedSessionId(raw ? decodeURIComponent(raw) : null);
+  const sessionId = getSessionIdFromRequest(request);
   if (!sessionId) return null;
 
   const db = getDb();
@@ -146,6 +202,7 @@ export async function getUserFromRequest(
     .select({
       sessionId: sessions.id,
       expiresAt: sessions.expiresAt,
+      lastSeenAt: sessions.lastSeenAt,
       userId: users.id,
       email: users.email,
       name: users.name,
@@ -160,7 +217,14 @@ export async function getUserFromRequest(
     .limit(1);
 
   const row = rows[0];
-  if (!row || row.expiresAt < new Date() || !row.isActive) {
+  const expired =
+    row != null &&
+    (!row.isActive ||
+      sessionLifetimeExpired({
+        expiresAt: row.expiresAt,
+        lastSeenAt: row.lastSeenAt,
+      }));
+  if (!row || expired) {
     if (row) await db.delete(sessions).where(eq(sessions.id, sessionId));
     return null;
   }
@@ -218,5 +282,13 @@ export async function redirectIfAuthenticated(
 
 export async function cleanupExpiredSessions(): Promise<void> {
   const db = getDb();
-  await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
+  const now = new Date();
+  await db
+    .delete(sessions)
+    .where(
+      or(
+        lt(sessions.expiresAt, now),
+        lte(sessions.lastSeenAt, sessionIdleCutoff(now)),
+      ),
+    );
 }

@@ -21,6 +21,19 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-sessions",
+    shipped: "2026-10-10",
+    title: "Shorter sessions and a sign-in record",
+    changes: [
+      "A sign-in ends after 12 hours without use. It still ends after 30 days even if it is used.",
+      "Account can sign out every other session and leave this browser signed in.",
+      "Administrators can read recent sign-ins, failed attempts, and sign-outs.",
+      "The app process runs as the node user. The QuickBooks client uses patched axios and form-data.",
+    ],
+    commit: "",
+    parent: "06f55612ee768b7ce486c18e5e1e4af8f2c4a829",
+  },
+  {
     id: "2026-10-10-confirm",
     shipped: "2026-10-10",
     title: "Email confirmation and safer product rules",

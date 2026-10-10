@@ -43,6 +43,10 @@
     "tsx": "^4.21.0",
     "dotenv": "^17.4.2"
   },
+  "overrides": {
+    "axios": "1.20.0",
+    "form-data": "4.0.6"
+  },
   "devDependencies": {
     "@react-router/dev": "7.18.4",
     "@tailwindcss/vite": "^4.2.2",

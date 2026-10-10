@@ -5,7 +5,20 @@ import { SubmitButton } from "~/components/submit-button";
 import { ChangePasswordForm } from "~/components/change-password-form";
 import { requestEmailChange } from "~/lib/email-change.server";
 import { isResendConfigured } from "~/lib/resend.server";
-import { requireUser } from "~/lib/session.server";
+import { SESSION_DAYS, SESSION_IDLE_HOURS } from "~/lib/session-expiry";
+import {
+  destroyOtherSessions,
+  getSessionIdFromRequest,
+  listUserSessions,
+  requireUser,
+} from "~/lib/session.server";
+
+function formatWhen(iso: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(iso));
+}
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -16,9 +29,14 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const user = await requireUser(request);
+  const currentSessionId = getSessionIdFromRequest(request);
+  const sessions = await listUserSessions(user.id, currentSessionId);
   return {
     user,
     resendConfigured: isResendConfigured(),
+    sessions,
+    idleHours: SESSION_IDLE_HOURS,
+    sessionDays: SESSION_DAYS,
   };
 }
 
@@ -26,6 +44,18 @@ export async function action({ request }: Route.ActionArgs) {
   const user = await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
+
+  if (intent === "signOutOthers") {
+    const sessionId = getSessionIdFromRequest(request);
+    if (!sessionId) {
+      return {
+        scope: "signOutOthers" as const,
+        error: "This browser is not signed in.",
+      };
+    }
+    const signedOut = await destroyOtherSessions(user.id, sessionId);
+    return { scope: "signOutOthers" as const, signedOut };
+  }
 
   if (intent === "changeEmail") {
     const newEmail = String(form.get("newEmail") ?? "").trim();
@@ -62,7 +92,9 @@ export default function AccountPage({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { user, resendConfigured } = loaderData;
+  const { user, resendConfigured, sessions, idleHours, sessionDays } =
+    loaderData;
+  const otherSessions = sessions.filter((session) => !session.current).length;
 
   return (
     <AppPage
@@ -151,6 +183,64 @@ export default function AccountPage({
           For security, the confirmation link is sent to your new address only.
           All active sessions are ended when you confirm the change.
         </p>
+      </section>
+
+      <section className="mt-8 max-w-lg rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-6">
+        <h2 className="text-lg font-medium text-dark">Sessions</h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          A sign-in ends after {idleHours} hours without use, or after{" "}
+          {sessionDays} days even if it is used. Changing your password also
+          signs out every other session.
+        </p>
+
+        <ul className="mt-4 space-y-3">
+          {sessions.map((session) => (
+            <li
+              key={session.id}
+              className="rounded-jamyang border border-sand-dark/40 px-3 py-2 text-sm"
+            >
+              <p className="font-medium text-dark">
+                {session.current ? "This browser" : "Another session"}
+              </p>
+              <p className="mt-1 text-ink-muted">
+                Last used {formatWhen(session.lastSeenAt)}
+                {session.ipAddress ? ` · ${session.ipAddress}` : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+
+        {actionData?.scope === "signOutOthers" &&
+        "signedOut" in actionData ? (
+          <p role="status" className="mt-4 text-sm text-dark">
+            {actionData.signedOut === 0
+              ? "There were no other sessions."
+              : actionData.signedOut === 1
+                ? "Signed out 1 other session."
+                : `Signed out ${actionData.signedOut} other sessions.`}
+          </p>
+        ) : null}
+        {actionData?.scope === "signOutOthers" && actionData.error ? (
+          <p role="alert" className="mt-4 text-sm text-maroon">
+            {actionData.error}
+          </p>
+        ) : null}
+
+        {otherSessions > 0 ? (
+          <Form method="post" className="mt-4">
+            <SubmitButton
+              intent="signOutOthers"
+              variant="outline"
+              loadingLabel="Signing out…"
+            >
+              Sign out other sessions
+            </SubmitButton>
+          </Form>
+        ) : (
+          <p className="mt-4 text-xs text-ink-faint">
+            No other sessions are signed in.
+          </p>
+        )}
       </section>
 
       <section className="mt-8 max-w-lg rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-6">
