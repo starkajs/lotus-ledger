@@ -27,7 +27,7 @@ export const changelog: ChangelogEntry[] = [
     changes: [
       "Filtering WooCommerce orders by amount compares the total as a number, so the page loads.",
     ],
-    commit: "",
+    commit: "b7f3a5a68c62e645c84060b76c197136c33c8777",
     parent: "ee27f317e10ad1be5d3b909dff91fb4b5c57ab91",
   },
   {
