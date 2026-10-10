@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import {
+  ReconciliationDetailGroup,
+  ReconciliationDetailList,
+} from "~/components/reconciliation-detail-group";
+import {
   buildReconciliationSummaryRows,
   WcStripeReconciliationSummaryTable,
 } from "~/components/wc-stripe-reconciliation-summary";
@@ -296,27 +300,28 @@ function OrdersByStatus({
   returnTo: string;
 }) {
   return (
-    <>
+    <ReconciliationDetailList>
       {groups.map((group) => (
-        <div
+        <ReconciliationDetailGroup
           key={group.status}
-          className="overflow-hidden rounded-jamyang border border-sand-dark/40"
-        >
-          <div className="border-b border-sand-dark/40 bg-surface px-3 py-2 sm:px-4">
-            <h3 className="text-xs font-medium uppercase tracking-wide text-ink-muted">
-              {group.status}
-              <span className="ml-1.5 font-normal normal-case text-ink-faint">
-                ({group.orders.length} order
-                {group.orders.length === 1 ? "" : "s"})
-              </span>
-            </h3>
-            <div className="mt-2">
-              <MatchedWcOrderTotals
-                totals={group.wcTotals}
-                className="mb-0 border-0 bg-transparent px-0 py-0"
-              />
+          summary={
+            <div className="bg-surface px-3 py-2 sm:px-4">
+              <h3 className="text-xs font-medium uppercase tracking-wide text-ink-muted">
+                {group.status}
+                <span className="ml-1.5 font-normal normal-case text-ink-faint">
+                  ({group.orders.length} order
+                  {group.orders.length === 1 ? "" : "s"})
+                </span>
+              </h3>
+              <div className="mt-2">
+                <MatchedWcOrderTotals
+                  totals={group.wcTotals}
+                  className="mb-0 border-0 bg-transparent px-0 py-0"
+                />
+              </div>
             </div>
-          </div>
+          }
+        >
           <ul className="divide-y divide-sand-dark/25 bg-surface-overlay">
             {group.orders.map((order) => (
               <li key={order.id} className="px-3 py-2 text-sm">
@@ -329,9 +334,9 @@ function OrdersByStatus({
               </li>
             ))}
           </ul>
-        </div>
+        </ReconciliationDetailGroup>
       ))}
-    </>
+    </ReconciliationDetailList>
   );
 }
 
@@ -407,23 +412,27 @@ export function WcStripeReconciliationPanels({
                 wcTotals={matchedWcTotals}
               />
             </section>
+            <ReconciliationDetailList>
             {matchedByProduct.map((group) => (
-              <section
+              <ReconciliationDetailGroup
                 key={group.productKey}
-                className="overflow-hidden rounded-jamyang border border-sand-dark/40"
+                summary={
+                  <>
+                    <div className="bg-surface px-3 py-2 sm:px-4">
+                      <ProductGroupHeading
+                        productCode={group.productCode}
+                        productName={group.productName}
+                        count={group.pairs.length}
+                        countLabel="order"
+                      />
+                    </div>
+                    <MatchedGroupSubtotals
+                      stripeTotals={group.stripeTotals}
+                      wcTotals={group.wcTotals}
+                    />
+                  </>
+                }
               >
-                <div className="bg-surface px-3 py-2 sm:px-4">
-                  <ProductGroupHeading
-                    productCode={group.productCode}
-                    productName={group.productName}
-                    count={group.pairs.length}
-                    countLabel="order"
-                  />
-                </div>
-                <MatchedGroupSubtotals
-                  stripeTotals={group.stripeTotals}
-                  wcTotals={group.wcTotals}
-                />
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[48rem] text-left text-xs">
                     <thead className="bg-surface-overlay text-ink-muted">
@@ -452,8 +461,9 @@ export function WcStripeReconciliationPanels({
                     </tbody>
                   </table>
                 </div>
-              </section>
+              </ReconciliationDetailGroup>
             ))}
+            </ReconciliationDetailList>
           </div>
         )}
       </Panel>
@@ -536,23 +546,27 @@ export function WcStripeReconciliationPanels({
                 wcTotals={[]}
               />
             </section>
+            <ReconciliationDetailList>
             {unmatchedStripeByProduct.map((group) => (
-              <div
+              <ReconciliationDetailGroup
                 key={group.productKey}
-                className="overflow-hidden rounded-jamyang border border-sand-dark/40"
+                summary={
+                  <>
+                    <div className="bg-surface px-3 py-2 sm:px-4">
+                      <ProductGroupHeading
+                        productCode={group.productCode}
+                        productName={group.productName}
+                        count={group.transactions.length}
+                        countLabel="transaction"
+                      />
+                    </div>
+                    <MatchedGroupSubtotals
+                      stripeTotals={group.stripeTotals}
+                      wcTotals={[]}
+                    />
+                  </>
+                }
               >
-                <div className="bg-surface px-3 py-2 sm:px-4">
-                  <ProductGroupHeading
-                    productCode={group.productCode}
-                    productName={group.productName}
-                    count={group.transactions.length}
-                    countLabel="transaction"
-                  />
-                </div>
-                <MatchedGroupSubtotals
-                  stripeTotals={group.stripeTotals}
-                  wcTotals={[]}
-                />
                 <ul className="divide-y divide-sand-dark/25 bg-surface-overlay">
                   {group.transactions.map((tx) => (
                     <li key={tx.id} className="px-3 py-2">
@@ -569,8 +583,9 @@ export function WcStripeReconciliationPanels({
                     </li>
                   ))}
                 </ul>
-              </div>
+              </ReconciliationDetailGroup>
             ))}
+            </ReconciliationDetailList>
           </div>
         )}
       </Panel>

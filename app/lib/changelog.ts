@@ -21,6 +21,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-reconciliation-accordions",
+    shipped: "2026-10-10",
+    title: "Reconciliation details collapse",
+    changes: [
+      "Each group on the WooCommerce to Stripe and Stripe to QuickBooks reconciliations can be opened or closed. The totals stay visible, and the transaction list starts closed.",
+    ],
+    commit: "",
+    parent: "76b61254037b40c2e9f7d525e868ccacdbd98251",
+  },
+  {
     id: "2026-10-10-wc-stripe-no-charge",
     shipped: "2026-10-10",
     title: "WooCommerce orders with no Stripe charge",

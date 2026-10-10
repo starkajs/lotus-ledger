@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import {
+  ReconciliationDetailGroup,
+  ReconciliationDetailList,
+} from "~/components/reconciliation-detail-group";
+import {
   buildStripeQbReconciliationSummaryRows,
   StripeQbReconciliationSummaryTable,
 } from "~/components/stripe-qb-reconciliation-summary";
@@ -349,23 +353,27 @@ export function StripeQbReconciliationPanels({
                 qbTotals={sumMatchedQbTotals(matched)}
               />
             </section>
+            <ReconciliationDetailList>
             {matchedByProduct.map((group) => (
-              <section
+              <ReconciliationDetailGroup
                 key={group.productKey}
-                className="overflow-hidden rounded-jamyang border border-sand-dark/40"
+                summary={
+                  <>
+                    <div className="bg-surface px-3 py-2 sm:px-4">
+                      <ProductGroupHeading
+                        productCode={group.productCode}
+                        productName={group.productName}
+                        count={group.pairs.length}
+                        countLabel="pair"
+                      />
+                    </div>
+                    <MatchedSubtotals
+                      stripeTotals={group.stripeTotals}
+                      qbTotals={group.qbTotals}
+                    />
+                  </>
+                }
               >
-                <div className="bg-surface px-3 py-2 sm:px-4">
-                  <ProductGroupHeading
-                    productCode={group.productCode}
-                    productName={group.productName}
-                    count={group.pairs.length}
-                    countLabel="pair"
-                  />
-                </div>
-                <MatchedSubtotals
-                  stripeTotals={group.stripeTotals}
-                  qbTotals={group.qbTotals}
-                />
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[48rem] text-left text-xs">
                     <thead className="bg-surface-overlay text-ink-muted">
@@ -406,8 +414,9 @@ export function StripeQbReconciliationPanels({
                     </tbody>
                   </table>
                 </div>
-              </section>
+              </ReconciliationDetailGroup>
             ))}
+            </ReconciliationDetailList>
           </div>
         )}
       </Panel>
@@ -434,22 +443,24 @@ export function StripeQbReconciliationPanels({
                 className="mb-0 border-0 border-b border-sand-dark/40 rounded-none"
               />
             </section>
+            <ReconciliationDetailList>
             {unmatchedStripeByReason.map((group) => (
-              <div
+              <ReconciliationDetailGroup
                 key={group.reason}
-                className="overflow-hidden rounded-jamyang border border-sand-dark/40"
-              >
-                <div className="border-b border-sand-dark/40 bg-surface px-3 py-2 sm:px-4">
-                  <h3 className="text-xs font-medium text-dark">
-                    {group.reasonLabel}
-                    <span className="ml-1.5 font-normal text-ink-faint">
-                      ({group.transactions.length})
-                    </span>
-                  </h3>
-                  <div className="mt-2">
-                    <StripeTotalsBar totals={group.stripeTotals} className="mb-0" />
+                summary={
+                  <div className="bg-surface px-3 py-2 sm:px-4">
+                    <h3 className="text-xs font-medium text-dark">
+                      {group.reasonLabel}
+                      <span className="ml-1.5 font-normal text-ink-faint">
+                        ({group.transactions.length})
+                      </span>
+                    </h3>
+                    <div className="mt-2">
+                      <StripeTotalsBar totals={group.stripeTotals} className="mb-0" />
+                    </div>
                   </div>
-                </div>
+                }
+              >
                 <ul className="divide-y divide-sand-dark/25 bg-surface-overlay">
                   {group.transactions.map((tx) => (
                     <li key={tx.id} className="px-3 py-2">
@@ -457,25 +468,28 @@ export function StripeQbReconciliationPanels({
                     </li>
                   ))}
                 </ul>
-              </div>
+              </ReconciliationDetailGroup>
             ))}
             {unmatchedStripeByProduct.map((group) => (
-              <div
+              <ReconciliationDetailGroup
                 key={group.productKey}
-                className="overflow-hidden rounded-jamyang border border-sand-dark/40"
+                summary={
+                  <>
+                    <div className="bg-surface px-3 py-2 sm:px-4">
+                      <ProductGroupHeading
+                        productCode={group.productCode}
+                        productName={group.productName}
+                        count={group.transactions.length}
+                        countLabel="transaction"
+                      />
+                    </div>
+                    <StripeTotalsBar
+                      totals={group.stripeTotals}
+                      className="mb-0 border-0 border-b border-sand-dark/40 rounded-none"
+                    />
+                  </>
+                }
               >
-                <div className="bg-surface px-3 py-2 sm:px-4">
-                  <ProductGroupHeading
-                    productCode={group.productCode}
-                    productName={group.productName}
-                    count={group.transactions.length}
-                    countLabel="transaction"
-                  />
-                </div>
-                <StripeTotalsBar
-                  totals={group.stripeTotals}
-                  className="mb-0 border-0 border-b border-sand-dark/40 rounded-none"
-                />
                 <ul className="divide-y divide-sand-dark/25 bg-surface-overlay">
                   {group.transactions.map((tx) => (
                     <li key={tx.id} className="px-3 py-2">
@@ -491,8 +505,9 @@ export function StripeQbReconciliationPanels({
                     </li>
                   ))}
                 </ul>
-              </div>
+              </ReconciliationDetailGroup>
             ))}
+            </ReconciliationDetailList>
           </div>
         )}
       </Panel>
@@ -519,24 +534,28 @@ export function StripeQbReconciliationPanels({
                 className="mb-0 border-0 border-b border-sand-dark/40 rounded-none"
               />
             </section>
+            <ReconciliationDetailList>
             {unmatchedQbByCustomer.map((group) => (
-              <div
+              <ReconciliationDetailGroup
                 key={group.customerKey}
-                className="overflow-hidden rounded-jamyang border border-sand-dark/40"
+                summary={
+                  <>
+                    <div className="bg-surface px-3 py-2 sm:px-4">
+                      <h3 className="text-xs font-medium text-dark">
+                        {group.customerName}
+                        <span className="ml-1.5 font-normal text-ink-faint">
+                          ({group.receipts.length} receipt
+                          {group.receipts.length === 1 ? "" : "s"})
+                        </span>
+                      </h3>
+                    </div>
+                    <QbTotalsBar
+                      totals={group.qbTotals}
+                      className="mb-0 border-0 border-b border-sand-dark/40 rounded-none"
+                    />
+                  </>
+                }
               >
-                <div className="bg-surface px-3 py-2 sm:px-4">
-                  <h3 className="text-xs font-medium text-dark">
-                    {group.customerName}
-                    <span className="ml-1.5 font-normal text-ink-faint">
-                      ({group.receipts.length} receipt
-                      {group.receipts.length === 1 ? "" : "s"})
-                    </span>
-                  </h3>
-                </div>
-                <QbTotalsBar
-                  totals={group.qbTotals}
-                  className="mb-0 border-0 border-b border-sand-dark/40 rounded-none"
-                />
                 <ul className="divide-y divide-sand-dark/25 bg-surface-overlay">
                   {group.receipts.map((receipt) => (
                     <li key={receipt.id} className="px-3 py-2">
@@ -549,8 +568,9 @@ export function StripeQbReconciliationPanels({
                     </li>
                   ))}
                 </ul>
-              </div>
+              </ReconciliationDetailGroup>
             ))}
+            </ReconciliationDetailList>
           </div>
         )}
       </Panel>
