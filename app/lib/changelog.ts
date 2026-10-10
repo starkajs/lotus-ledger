@@ -27,7 +27,7 @@ export const changelog: ChangelogEntry[] = [
     changes: [
       "WooCommerce products can be filtered to those that appear on an order and still have no Lotus product.",
     ],
-    commit: "",
+    commit: "9449fdbd762275ebe777e192a7020a8c298bf350",
     parent: "f827ac8638f780b45b6b33e1bcb56a1fd9b3710e",
   },
   {
