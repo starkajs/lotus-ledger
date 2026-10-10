@@ -21,6 +21,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-wc-stripe-other-period",
+    shipped: "2026-10-10",
+    title: "Stripe and WooCommerce in another period",
+    changes: [
+      "The WooCommerce to Stripe reconciliation separates orders whose Stripe charge is in another period, and Stripe charges whose WooCommerce order is in another period.",
+    ],
+    commit: "",
+    parent: "4806828a3aabb0423e1b67e570b1129ca7673d95",
+  },
+  {
     id: "2026-10-10-reconciliation-accordions",
     shipped: "2026-10-10",
     title: "Reconciliation details collapse",

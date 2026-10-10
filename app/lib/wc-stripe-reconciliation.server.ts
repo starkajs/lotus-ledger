@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, or, type SQL } from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   products,
@@ -59,6 +59,18 @@ export type WcStripeMatchedPair = {
   stripeTransactions: WcStripeReconciliationStripe[];
 };
 
+/** Order in this period, Stripe charge on another date. */
+export type WcStripeOtherPeriodPair = {
+  order: WcStripeReconciliationOrder;
+  stripeTransactions: WcStripeReconciliationStripe[];
+};
+
+/** Stripe charge in this period, WooCommerce order on another date. */
+export type StripeWcOtherPeriodPair = {
+  stripe: WcStripeReconciliationStripe;
+  order: WcStripeReconciliationOrder;
+};
+
 export type WcStripeReconciliationByStatus = {
   status: string;
   orders: WcStripeReconciliationOrder[];
@@ -87,14 +99,20 @@ export type WcStripeReconciliationData = {
   unmatchedWcByProduct: WcStripeReconciliationWcByProduct[];
   /** Failed, pending, or cancelled orders. No Stripe balance transaction exists. */
   noStripeChargeByStatus: WcStripeReconciliationByStatus[];
+  /** Paid orders whose Stripe charge falls outside this period. */
+  wcStripeOtherPeriod: WcStripeOtherPeriodPair[];
   unmatchedStripeByProduct: WcStripeReconciliationByProduct[];
+  /** Stripe charges whose WooCommerce order falls outside this period. */
+  stripeWcOtherPeriod: StripeWcOtherPeriodPair[];
   counts: {
     wcOrders: number;
     stripeTransactions: number;
     matched: number;
     unmatchedWc: number;
     noStripeCharge: number;
+    wcStripeOtherPeriod: number;
     unmatchedStripe: number;
+    stripeWcOtherPeriod: number;
   };
 };
 
@@ -131,37 +149,13 @@ async function loadOrdersInRange(
 ): Promise<WcStripeReconciliationOrder[]> {
   const db = getDb();
   const rows = await db
-    .select({
-      id: woocommerceOrders.id,
-      wcOrderId: woocommerceOrders.wcOrderId,
-      orderNumber: woocommerceOrders.orderNumber,
-      orderKey: woocommerceOrders.orderKey,
-      status: woocommerceOrders.status,
-      totalMinor: woocommerceOrders.totalMinor,
-      currency: woocommerceOrders.currency,
-      dateCreated: woocommerceOrders.dateCreated,
-      lotusProductId: woocommerceOrders.productId,
-      productCode: products.code,
-      productName: products.name,
-    })
+    .select(orderSelect)
     .from(woocommerceOrders)
     .leftJoin(products, eq(woocommerceOrders.productId, products.id))
     .where(wcDateWhere(dateFrom, dateTo))
     .orderBy(desc(woocommerceOrders.dateCreated));
 
-  return rows.map((row) => ({
-    id: row.id,
-    wcOrderId: row.wcOrderId,
-    orderNumber: row.orderNumber,
-    orderKey: row.orderKey,
-    status: row.status,
-    totalMinor: row.totalMinor,
-    currency: row.currency,
-    dateCreated: row.dateCreated.toISOString(),
-    lotusProductId: row.lotusProductId,
-    lotusProductCode: row.productCode,
-    lotusProductName: row.productName,
-  }));
+  return rows.map(orderRowToRecord);
 }
 
 async function loadStripeInRange(
@@ -170,44 +164,13 @@ async function loadStripeInRange(
 ): Promise<WcStripeReconciliationStripe[]> {
   const db = getDb();
   const rows = await db
-    .select({
-      id: stripeBalanceTransactions.id,
-      stripeBalanceTransactionId:
-        stripeBalanceTransactions.stripeBalanceTransactionId,
-      stripeCreatedAt: stripeBalanceTransactions.stripeCreatedAt,
-      amount: stripeBalanceTransactions.amount,
-      fee: stripeBalanceTransactions.fee,
-      net: stripeBalanceTransactions.net,
-      currency: stripeBalanceTransactions.currency,
-      orderKey: stripeBalanceTransactions.orderKey,
-      wcOrderId: stripeBalanceTransactions.wcOrderId,
-      stripeRaw: stripeBalanceTransactions.stripeRaw,
-      productId: stripeBalanceTransactions.productId,
-      productCode: products.code,
-      productName: products.name,
-    })
+    .select(stripeSelect)
     .from(stripeBalanceTransactions)
     .leftJoin(products, eq(stripeBalanceTransactions.productId, products.id))
     .where(stripeDateWhere(dateFrom, dateTo))
     .orderBy(desc(stripeBalanceTransactions.stripeCreatedAt));
 
-  return rows.map((row) => ({
-    id: row.id,
-    stripeBalanceTransactionId: row.stripeBalanceTransactionId,
-    stripeCreatedAt: row.stripeCreatedAt.toISOString(),
-    amount: row.amount,
-    fee: row.fee,
-    net: row.net,
-    currency: row.currency,
-    orderKey:
-      normalizeOrderKey(row.orderKey) ??
-      extractOrderKeyFromStripeRaw(row.stripeRaw ?? null),
-    wcOrderId:
-      row.wcOrderId ?? extractWcOrderIdFromStripeRaw(row.stripeRaw ?? null),
-    productId: row.productId,
-    productCode: row.productCode,
-    productName: row.productName,
-  }));
+  return rows.map(stripeRowToRecord);
 }
 
 function groupUnmatchedWcByStatus(
@@ -278,6 +241,182 @@ function groupUnmatchedStripeByProduct(
   return sortProductGroups([...byProduct.values()]);
 }
 
+function londonCalendarDate(iso: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/London",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(iso));
+}
+
+function isOutsidePeriod(iso: string, dateFrom: string, dateTo: string): boolean {
+  const day = londonCalendarDate(iso);
+  return day < dateFrom || day > dateTo;
+}
+
+function anyLink(parts: SQL[]): SQL | undefined {
+  if (parts.length === 0) return undefined;
+  if (parts.length === 1) return parts[0];
+  return or(...parts);
+}
+
+type OrderRow = {
+  id: string;
+  wcOrderId: number;
+  orderNumber: string | null;
+  orderKey: string | null;
+  status: string;
+  totalMinor: number;
+  currency: string;
+  dateCreated: Date;
+  lotusProductId: string | null;
+  productCode: string | null;
+  productName: string | null;
+};
+
+function orderRowToRecord(row: OrderRow): WcStripeReconciliationOrder {
+  return {
+    id: row.id,
+    wcOrderId: row.wcOrderId,
+    orderNumber: row.orderNumber,
+    orderKey: row.orderKey,
+    status: row.status,
+    totalMinor: row.totalMinor,
+    currency: row.currency,
+    dateCreated: row.dateCreated.toISOString(),
+    lotusProductId: row.lotusProductId,
+    lotusProductCode: row.productCode,
+    lotusProductName: row.productName,
+  };
+}
+
+type StripeRow = {
+  id: string;
+  stripeBalanceTransactionId: string;
+  stripeCreatedAt: Date;
+  amount: number;
+  fee: number;
+  net: number;
+  currency: string;
+  orderKey: string | null;
+  wcOrderId: number | null;
+  stripeRaw: Record<string, unknown> | null;
+  productId: string | null;
+  productCode: string | null;
+  productName: string | null;
+};
+
+function stripeRowToRecord(row: StripeRow): WcStripeReconciliationStripe {
+  return {
+    id: row.id,
+    stripeBalanceTransactionId: row.stripeBalanceTransactionId,
+    stripeCreatedAt: row.stripeCreatedAt.toISOString(),
+    amount: row.amount,
+    fee: row.fee,
+    net: row.net,
+    currency: row.currency,
+    orderKey:
+      normalizeOrderKey(row.orderKey) ??
+      extractOrderKeyFromStripeRaw(row.stripeRaw ?? null),
+    wcOrderId:
+      row.wcOrderId ?? extractWcOrderIdFromStripeRaw(row.stripeRaw ?? null),
+    productId: row.productId,
+    productCode: row.productCode,
+    productName: row.productName,
+  };
+}
+
+const orderSelect = {
+  id: woocommerceOrders.id,
+  wcOrderId: woocommerceOrders.wcOrderId,
+  orderNumber: woocommerceOrders.orderNumber,
+  orderKey: woocommerceOrders.orderKey,
+  status: woocommerceOrders.status,
+  totalMinor: woocommerceOrders.totalMinor,
+  currency: woocommerceOrders.currency,
+  dateCreated: woocommerceOrders.dateCreated,
+  lotusProductId: woocommerceOrders.productId,
+  productCode: products.code,
+  productName: products.name,
+};
+
+const stripeSelect = {
+  id: stripeBalanceTransactions.id,
+  stripeBalanceTransactionId: stripeBalanceTransactions.stripeBalanceTransactionId,
+  stripeCreatedAt: stripeBalanceTransactions.stripeCreatedAt,
+  amount: stripeBalanceTransactions.amount,
+  fee: stripeBalanceTransactions.fee,
+  net: stripeBalanceTransactions.net,
+  currency: stripeBalanceTransactions.currency,
+  orderKey: stripeBalanceTransactions.orderKey,
+  wcOrderId: stripeBalanceTransactions.wcOrderId,
+  stripeRaw: stripeBalanceTransactions.stripeRaw,
+  productId: stripeBalanceTransactions.productId,
+  productCode: products.code,
+  productName: products.name,
+};
+
+async function loadStripeLinkedToOrders(
+  orders: WcStripeReconciliationOrder[],
+): Promise<WcStripeReconciliationStripe[]> {
+  const keys = [
+    ...new Set(
+      orders
+        .map((order) => normalizeOrderKey(order.orderKey))
+        .filter((key): key is string => key != null),
+    ),
+  ];
+  const ids = [...new Set(orders.map((order) => order.wcOrderId).filter((id) => id > 0))];
+  const parts: SQL[] = [];
+  if (keys.length > 0) parts.push(inArray(stripeBalanceTransactions.orderKey, keys));
+  if (ids.length > 0) parts.push(inArray(stripeBalanceTransactions.wcOrderId, ids));
+  const where = anyLink(parts);
+  if (!where) return [];
+
+  const db = getDb();
+  const rows = await db
+    .select(stripeSelect)
+    .from(stripeBalanceTransactions)
+    .leftJoin(products, eq(stripeBalanceTransactions.productId, products.id))
+    .where(where)
+    .orderBy(desc(stripeBalanceTransactions.stripeCreatedAt));
+  return rows.map(stripeRowToRecord);
+}
+
+async function loadOrdersLinkedToStripe(
+  transactions: WcStripeReconciliationStripe[],
+): Promise<WcStripeReconciliationOrder[]> {
+  const keys = [
+    ...new Set(
+      transactions
+        .map((tx) => normalizeOrderKey(tx.orderKey))
+        .filter((key): key is string => key != null),
+    ),
+  ];
+  const ids = [
+    ...new Set(
+      transactions
+        .map((tx) => tx.wcOrderId)
+        .filter((id): id is number => id != null && id > 0),
+    ),
+  ];
+  const parts: SQL[] = [];
+  if (keys.length > 0) parts.push(inArray(woocommerceOrders.orderKey, keys));
+  if (ids.length > 0) parts.push(inArray(woocommerceOrders.wcOrderId, ids));
+  const where = anyLink(parts);
+  if (!where) return [];
+
+  const db = getDb();
+  const rows = await db
+    .select(orderSelect)
+    .from(woocommerceOrders)
+    .leftJoin(products, eq(woocommerceOrders.productId, products.id))
+    .where(where)
+    .orderBy(desc(woocommerceOrders.dateCreated));
+  return rows.map(orderRowToRecord);
+}
+
 export async function loadWcStripeReconciliation(input: {
   dateFrom: IsoDateString;
   dateTo: IsoDateString;
@@ -315,19 +454,58 @@ export async function loadWcStripeReconciliation(input: {
     }
   }
 
+  const [linkedStripe, linkedOrders] = await Promise.all([
+    loadStripeLinkedToOrders(unmatchedWc),
+    loadOrdersLinkedToStripe(unmatchedStripe),
+  ]);
+
+  const wcStripeOtherPeriod: WcStripeOtherPeriodPair[] = [];
+  const unmatchedWcInPeriod: WcStripeReconciliationOrder[] = [];
+  for (const order of unmatchedWc) {
+    const linked = linkedStripe.filter(
+      (tx) =>
+        wooCommerceOrderMatchesStripeTransaction(order, tx) &&
+        isOutsidePeriod(tx.stripeCreatedAt, input.dateFrom, input.dateTo),
+    );
+    if (linked.length > 0) {
+      wcStripeOtherPeriod.push({ order, stripeTransactions: linked });
+    } else {
+      unmatchedWcInPeriod.push(order);
+    }
+  }
+
+  const stripeWcOtherPeriod: StripeWcOtherPeriodPair[] = [];
+  const unmatchedStripeInPeriod: WcStripeReconciliationStripe[] = [];
+  for (const tx of unmatchedStripe) {
+    const order = linkedOrders.find(
+      (candidate) =>
+        wooCommerceOrderMatchesStripeTransaction(candidate, tx) &&
+        isOutsidePeriod(candidate.dateCreated, input.dateFrom, input.dateTo),
+    );
+    if (order) {
+      stripeWcOtherPeriod.push({ stripe: tx, order });
+    } else {
+      unmatchedStripeInPeriod.push(tx);
+    }
+  }
+
   return {
     matched,
-    unmatchedWcByStatus: groupUnmatchedWcByStatus(unmatchedWc),
-    unmatchedWcByProduct: groupUnmatchedWcByProduct(unmatchedWc),
+    unmatchedWcByStatus: groupUnmatchedWcByStatus(unmatchedWcInPeriod),
+    unmatchedWcByProduct: groupUnmatchedWcByProduct(unmatchedWcInPeriod),
     noStripeChargeByStatus: groupUnmatchedWcByStatus(noStripeCharge),
-    unmatchedStripeByProduct: groupUnmatchedStripeByProduct(unmatchedStripe),
+    wcStripeOtherPeriod,
+    unmatchedStripeByProduct: groupUnmatchedStripeByProduct(unmatchedStripeInPeriod),
+    stripeWcOtherPeriod,
     counts: {
       wcOrders: orders.length,
       stripeTransactions: stripeTransactions.length,
       matched: matched.length,
-      unmatchedWc: unmatchedWc.length,
+      unmatchedWc: unmatchedWcInPeriod.length,
       noStripeCharge: noStripeCharge.length,
-      unmatchedStripe: unmatchedStripe.length,
+      wcStripeOtherPeriod: wcStripeOtherPeriod.length,
+      unmatchedStripe: unmatchedStripeInPeriod.length,
+      stripeWcOtherPeriod: stripeWcOtherPeriod.length,
     },
   };
 }

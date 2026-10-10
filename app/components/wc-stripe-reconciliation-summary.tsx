@@ -12,7 +12,9 @@ import {
   sumWcOrders,
 } from "~/lib/wc-stripe-reconciliation-totals";
 import type {
+  StripeWcOtherPeriodPair,
   WcStripeMatchedPair,
+  WcStripeOtherPeriodPair,
   WcStripeReconciliationByProduct,
   WcStripeReconciliationByStatus,
   WcStripeReconciliationWcByProduct,
@@ -117,7 +119,9 @@ export function buildReconciliationSummaryRows(input: {
   unmatchedWcByStatus: WcStripeReconciliationByStatus[];
   unmatchedWcByProduct: WcStripeReconciliationWcByProduct[];
   noStripeChargeByStatus: WcStripeReconciliationByStatus[];
+  wcStripeOtherPeriod: WcStripeOtherPeriodPair[];
   unmatchedStripeByProduct: WcStripeReconciliationByProduct[];
+  stripeWcOtherPeriod: StripeWcOtherPeriodPair[];
 }): SummaryRow[] {
   const rows: SummaryRow[] = [];
 
@@ -163,6 +167,20 @@ export function buildReconciliationSummaryRows(input: {
       count: input.matched.length,
       stripeTotals: sumMatchedStripeTotals(input.matched),
       wcTotals: sumMatchedWcOrderTotals(input.matched),
+      isSectionTotal: true,
+    });
+  }
+
+  if (input.wcStripeOtherPeriod.length > 0) {
+    rows.push({
+      section: "WC — Stripe in another period",
+      groupLabel: "Section total",
+      productCode: null,
+      count: input.wcStripeOtherPeriod.length,
+      stripeTotals: sumStripeTransactions(
+        input.wcStripeOtherPeriod.flatMap((pair) => pair.stripeTransactions),
+      ),
+      wcTotals: sumWcOrders(input.wcStripeOtherPeriod.map((pair) => pair.order)),
       isSectionTotal: true,
     });
   }
@@ -214,6 +232,20 @@ export function buildReconciliationSummaryRows(input: {
     });
   }
 
+  if (input.stripeWcOtherPeriod.length > 0) {
+    rows.push({
+      section: "Stripe — WC in another period",
+      groupLabel: "Section total",
+      productCode: null,
+      count: input.stripeWcOtherPeriod.length,
+      stripeTotals: sumStripeTransactions(
+        input.stripeWcOtherPeriod.map((pair) => pair.stripe),
+      ),
+      wcTotals: sumWcOrders(input.stripeWcOtherPeriod.map((pair) => pair.order)),
+      isSectionTotal: true,
+    });
+  }
+
   for (const group of input.unmatchedStripeByProduct) {
     rows.push({
       section: "Stripe — not matched",
@@ -256,9 +288,10 @@ export function WcStripeReconciliationSummaryTable({
       <header className="border-b border-sand-dark/40 px-4 py-3 sm:px-6">
         <h2 className="text-sm font-medium text-dark">Summary</h2>
         <p className="mt-1 text-xs text-ink-muted">
-          Paid orders with no Stripe link are WC — not matched. Failed, pending,
-          and cancelled orders are WC — no Stripe charge. Stripe amounts are
-          gross, fee, and net.
+          Paid orders with no Stripe link are WC — not matched. A charge or order
+          dated outside this period is listed on its own. Failed, pending, and
+          cancelled orders are WC — no Stripe charge. Stripe amounts are gross,
+          fee, and net.
         </p>
       </header>
       <table className="w-full min-w-[56rem] text-left text-xs">

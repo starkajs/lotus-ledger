@@ -24,6 +24,8 @@ import type {
   WcStripeMatchedPair,
   WcStripeReconciliationByProduct,
   WcStripeReconciliationByStatus,
+  StripeWcOtherPeriodPair,
+  WcStripeOtherPeriodPair,
   WcStripeReconciliationOrder,
   WcStripeReconciliationStripe,
   WcStripeReconciliationWcByProduct,
@@ -269,15 +271,19 @@ function Panel({
   title,
   count,
   description,
+  tone = "default",
   children,
 }: {
   title: string;
   count: number;
   description?: string;
+  tone?: "default" | "attention";
   children: ReactNode;
 }) {
+  const border =
+    tone === "attention" ? "border-amber-700/50" : "border-sand-dark/50";
   return (
-    <section className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay">
+    <section className={`rounded-jamyang-lg border ${border} bg-surface-overlay`}>
       <header className="border-b border-sand-dark/40 px-4 py-3 sm:px-6">
         <h2 className="text-sm font-medium text-dark">
           {title}
@@ -345,14 +351,18 @@ export function WcStripeReconciliationPanels({
   unmatchedWcByStatus,
   unmatchedWcByProduct,
   noStripeChargeByStatus,
+  wcStripeOtherPeriod,
   unmatchedStripeByProduct,
+  stripeWcOtherPeriod,
   returnTo,
 }: {
   matched: WcStripeMatchedPair[];
   unmatchedWcByStatus: WcStripeReconciliationByStatus[];
   unmatchedWcByProduct: WcStripeReconciliationWcByProduct[];
   noStripeChargeByStatus: WcStripeReconciliationByStatus[];
+  wcStripeOtherPeriod: WcStripeOtherPeriodPair[];
   unmatchedStripeByProduct: WcStripeReconciliationByProduct[];
+  stripeWcOtherPeriod: StripeWcOtherPeriodPair[];
   returnTo: string;
 }) {
   const unmatchedWcCount = unmatchedWcByStatus.reduce(
@@ -385,7 +395,9 @@ export function WcStripeReconciliationPanels({
     unmatchedWcByStatus,
     unmatchedWcByProduct,
     noStripeChargeByStatus,
+    wcStripeOtherPeriod,
     unmatchedStripeByProduct,
+    stripeWcOtherPeriod,
   });
 
   return (
@@ -468,6 +480,33 @@ export function WcStripeReconciliationPanels({
         )}
       </Panel>
 
+      {wcStripeOtherPeriod.length > 0 && (
+        <Panel
+          title="WooCommerce — Stripe in another period"
+          count={wcStripeOtherPeriod.length}
+          tone="attention"
+          description="These orders have a Stripe charge. The charge date is outside this period, so it is not a missing payment."
+        >
+          <ul className="divide-y divide-sand-dark/25">
+            {wcStripeOtherPeriod.map(({ order, stripeTransactions }) => (
+              <li key={order.id} className="py-2 text-sm">
+                <OrderSummary order={order} returnTo={returnTo} />
+                <div className="mt-1 space-y-1">
+                  {stripeTransactions.map((tx) => (
+                    <div key={tx.id} className="text-xs text-amber-800">
+                      Stripe {formatCalendarDateShort(tx.stripeCreatedAt)}
+                      <span className="ml-2">
+                        <StripeTxnSummary tx={tx} returnTo={returnTo} />
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
+
       <Panel
         title="WooCommerce — not matched"
         count={unmatchedWcCount}
@@ -525,6 +564,30 @@ export function WcStripeReconciliationPanels({
           </div>
         )}
       </Panel>
+
+      {stripeWcOtherPeriod.length > 0 && (
+        <Panel
+          title="Stripe — WooCommerce in another period"
+          count={stripeWcOtherPeriod.length}
+          tone="attention"
+          description="These Stripe charges match a WooCommerce order. The order date is outside this period, so it is not a missing order."
+        >
+          <ul className="divide-y divide-sand-dark/25">
+            {stripeWcOtherPeriod.map(({ stripe, order }) => (
+              <li key={stripe.id} className="py-2 text-sm">
+                <StripeTxnSummary tx={stripe} returnTo={returnTo} />
+                <span className="mt-0.5 block text-[10px] text-ink-muted">
+                  {formatCalendarDateShort(stripe.stripeCreatedAt)}
+                </span>
+                <div className="mt-1 text-xs text-amber-800">
+                  WooCommerce order{" "}
+                  <OrderSummary order={order} returnTo={returnTo} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
 
       <Panel
         title="Stripe — not matched"
