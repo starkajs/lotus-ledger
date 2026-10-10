@@ -27,7 +27,7 @@ export const changelog: ChangelogEntry[] = [
     changes: [
       "The WooCommerce to Stripe reconciliation separates orders whose Stripe charge is in another period, and Stripe charges whose WooCommerce order is in another period.",
     ],
-    commit: "",
+    commit: "abf5e92f222d4646315956763d4f244235da0434",
     parent: "4806828a3aabb0423e1b67e570b1129ca7673d95",
   },
   {
