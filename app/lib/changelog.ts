@@ -29,7 +29,7 @@ export const changelog: ChangelogEntry[] = [
       "WooCommerce has a Refresh all button. One press pulls orders and the product catalog.",
       "Orders and Stripe transactions cover the last 30 days, or from the newest row already stored when that is older, up to 90 days.",
     ],
-    commit: "",
+    commit: "db3790608b7fafe7e6cdc71cb119b5f85d3483c0",
     parent: "87c1c7368c03d7bf961b97cfd487ca5f616c396a",
   },
   {
