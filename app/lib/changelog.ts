@@ -28,7 +28,7 @@ export const changelog: ChangelogEntry[] = [
       "Refreshing sales receipts or refund receipts now starts from the newest receipt already stored when that is older than 30 days, so a gap is filled.",
       "Last refreshed shows when that refresh finished, including a refresh that finds no new receipts.",
     ],
-    commit: "",
+    commit: "2e52a1e29072c142d2b8c2dae1f0c7e20cebd3fd",
     parent: "469eb0ab84edd134f09d30c31271fe79a44febba",
   },
   {
