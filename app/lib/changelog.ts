@@ -31,7 +31,7 @@ export const changelog: ChangelogEntry[] = [
       "Pages send framing, content-type, and referrer protections to the browser.",
       "The health check reports that the database is unavailable without showing the driver error.",
     ],
-    commit: "",
+    commit: "8b2db23c580d93bf15e880660157611881e6927f",
     parent: "d4286cba9b176f1660f5b3f740b531c846fd4fa5",
   },
 ];
