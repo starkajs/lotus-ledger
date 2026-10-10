@@ -33,7 +33,13 @@ if (!databaseUrl) {
 const sql = postgres(databaseUrl, { max: 1 });
 
 try {
-  const user = await createInvitedUser(sql, { email, password, name });
+  const user = await createInvitedUser(sql, {
+    email,
+    password,
+    name,
+    role: "admin",
+    mustChangePassword: false,
+  });
   console.log(`Seeded user ${user.email} (${user.id})`);
 } catch (err) {
   const message = err instanceof Error ? err.message : String(err);

@@ -17,11 +17,12 @@ import {
 
 const rawArgs = process.argv.slice(2);
 const noEmail = rawArgs.includes("--no-email");
-const args = rawArgs.filter((a) => a !== "--no-email");
+const asAdmin = rawArgs.includes("--admin");
+const args = rawArgs.filter((a) => a !== "--no-email" && a !== "--admin");
 
 if (args.length < 2) {
   console.error(
-    "Usage: npm run invite-user -- <email> <password> [name] [--no-email]",
+    "Usage: npm run invite-user -- <email> <password> [name] [--admin] [--no-email]",
   );
   process.exit(1);
 }
@@ -43,7 +44,13 @@ appUrl = appUrl.replace(/\/integrations\/quickbooks\/callback$/i, "");
 const sql = postgres(databaseUrl, { max: 1 });
 
 try {
-  const user = await createInvitedUser(sql, { email, password, name });
+  const user = await createInvitedUser(sql, {
+    email,
+    password,
+    name,
+    role: asAdmin ? "admin" : "member",
+    mustChangePassword: true,
+  });
   console.log(`Created user ${user.email} (${user.id})`);
 
   const resend = getResendConfigFromEnv();

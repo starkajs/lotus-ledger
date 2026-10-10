@@ -21,7 +21,7 @@ import {
   fetchStripeTransactions,
   type StripeTransactionSummary,
 } from "~/lib/stripe-transactions.server";
-import { requireUser } from "~/lib/session.server";
+import { adminPermissionError, isAdmin, requireUser } from "~/lib/session.server";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -31,7 +31,7 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const [connections, qbAccounts, qbPaymentMethods, qbTokens] = await Promise.all([
     listStripeConnections(),
     listQuickBooksAccounts(),
@@ -89,6 +89,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     qbDepositAccounts: qbAccounts.accounts.filter((a) => a.active),
     qbPaymentMethods: qbPaymentMethods.paymentMethods.filter((p) => p.active),
     defaultPaymentRefTemplate: DEFAULT_STRIPE_QB_PAYMENT_REF_TEMPLATE,
+    isAdmin: isAdmin(user),
   };
 }
 
@@ -96,6 +97,16 @@ export async function action({ request }: Route.ActionArgs) {
   const user = await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
+
+  const adminOnly =
+    intent === "add" ||
+    intent === "remove" ||
+    intent === "save-qb-mapping" ||
+    intent === "sync-payment-methods";
+  if (adminOnly) {
+    const denied = adminPermissionError(user);
+    if (denied) return { error: denied };
+  }
 
   if (intent === "add") {
     const label = String(form.get("label") ?? "").trim();
@@ -234,6 +245,7 @@ export default function StripeIntegration({
     qbDepositAccounts,
     qbPaymentMethods,
     defaultPaymentRefTemplate,
+    isAdmin: canManageStripe,
   } = loaderData;
 
   const selected = connections.find((c) => c.id === selectedId);
@@ -260,6 +272,7 @@ export default function StripeIntegration({
               </div>
             )}
 
+            {canManageStripe ? (
             <div className="rounded-jamyang-lg border border-sand-dark/50 p-4">
               <h3 className="text-sm font-medium text-dark">Add account</h3>
               <Form method="post" className="mt-4 space-y-3">
@@ -308,6 +321,11 @@ export default function StripeIntegration({
                 </SubmitButton>
               </Form>
             </div>
+            ) : (
+              <p className="text-sm text-ink-muted">
+                An administrator adds and removes Stripe accounts.
+              </p>
+            )}
           </aside>
 
           <section className="min-w-0 space-y-6">
@@ -321,6 +339,7 @@ export default function StripeIntegration({
               <>
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <h2 className="text-xl">{selected.label}</h2>
+                  {canManageStripe ? (
                   <Form method="post">
                     <input type="hidden" name="intent" value="remove" />
                     <input
@@ -338,6 +357,7 @@ export default function StripeIntegration({
                       Remove account
                     </SubmitButton>
                   </Form>
+                  ) : null}
                 </div>
 
                 <div
@@ -387,6 +407,7 @@ export default function StripeIntegration({
 
                 {verifyOk && (
                   <>
+                    {canManageStripe ? (
                     <div className="rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-4 sm:p-6">
                       <h3 className="text-sm font-medium text-dark">
                         QuickBooks mapping
@@ -522,6 +543,7 @@ export default function StripeIntegration({
                         </>
                       )}
                     </div>
+                    ) : null}
 
                     <div className="flex flex-wrap items-center justify-between gap-4">
                       <h3 className="text-lg">Recent balance transactions</h3>

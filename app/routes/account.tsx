@@ -2,6 +2,7 @@ import { Form } from "react-router";
 import type { Route } from "./+types/account";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
+import { ChangePasswordForm } from "~/components/change-password-form";
 import { requestEmailChange } from "~/lib/email-change.server";
 import { isResendConfigured } from "~/lib/resend.server";
 import { requireUser } from "~/lib/session.server";
@@ -150,6 +151,14 @@ export default function AccountPage({
           For security, the confirmation link is sent to your new address only.
           All active sessions are ended when you confirm the change.
         </p>
+      </section>
+
+      <section className="mt-8 max-w-lg rounded-jamyang-lg border border-sand-dark/50 bg-surface-overlay p-6">
+        <h2 className="text-lg font-medium text-dark">Password</h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          Use at least 12 characters. Changing it signs out every other session.
+        </p>
+        <ChangePasswordForm action="/account/password" redirectTo="/account" />
       </section>
     </AppPage>
   );

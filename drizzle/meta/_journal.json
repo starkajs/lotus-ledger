@@ -274,6 +274,13 @@
       "when": 1783200000000,
       "tag": "0038_quickbooks_connection_token_created_at",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791590400000,
+      "tag": "0039_access_control",
+      "breakpoints": true
     }
   ]
 }

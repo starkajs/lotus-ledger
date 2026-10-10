@@ -7,7 +7,7 @@ import {
   getQuickBooksEnvironment,
   isQuickBooksConfigured,
 } from "~/lib/env.server";
-import { requireUser } from "~/lib/session.server";
+import { adminPermissionError, isAdmin, requireUser } from "~/lib/session.server";
 import {
   fetchQuickBooksInvoices,
   verifyQuickBooksConnection,
@@ -24,7 +24,8 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
+  const canManageQuickBooks = isAdmin(user);
   const appConfigured = isQuickBooksConfigured();
   const tokens = await getQuickBooksTokens();
   const connected = Boolean(tokens);
@@ -38,6 +39,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       environment: getQuickBooksEnvironment(),
       redirectUri: getQuickBooksRedirectUri(),
       appUrl: getAppUrl(),
+      canManageQuickBooks,
     };
   }
 
@@ -53,6 +55,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       environment: getQuickBooksEnvironment(),
       redirectUri,
       appUrl,
+      canManageQuickBooks,
     };
   }
 
@@ -68,6 +71,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       environment: getQuickBooksEnvironment(),
       redirectUri,
       appUrl,
+      canManageQuickBooks,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -83,14 +87,19 @@ export async function loader({ request }: Route.LoaderArgs) {
       environment: getQuickBooksEnvironment(),
       redirectUri,
       appUrl,
+      canManageQuickBooks,
     };
   }
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const formData = await request.formData();
   if (formData.get("intent") === "disconnect") {
+    const denied = adminPermissionError(user);
+    if (denied) {
+      throw new Response(denied, { status: 403 });
+    }
     await clearQuickBooksTokens();
     return redirect("/integrations/quickbooks");
   }
@@ -118,13 +127,14 @@ export default function QuickBooksIntegration({
     environment,
     redirectUri,
     appUrl,
+    canManageQuickBooks,
   } = loaderData;
 
   const justConnected = searchParams.get("connected") === "1";
   const error = searchParams.get("error");
 
   const headerActions =
-    appConfigured && !connected ? (
+    canManageQuickBooks && appConfigured && !connected ? (
       <a
         href="/integrations/quickbooks/connect"
         className="rounded-jamyang-pill bg-maroon px-5 py-2 text-sm font-medium text-surface-overlay transition-colors hover:bg-maroon-dark"
@@ -226,9 +236,9 @@ APP_URL=http://localhost:5174`}
               Environment: <strong className="capitalize">{environment}</strong>
             </p>
             <p className="mt-2 text-sm text-ink-muted">
-              You will sign in to Intuit and authorise read access to Jamyang&apos;s
-              QuickBooks company. Tokens are saved encrypted in the database so
-              the web app and scheduled cron jobs share the same connection.
+              {canManageQuickBooks
+                ? "You will sign in to Intuit and authorise read access to Jamyang's QuickBooks company. Tokens are saved encrypted in the database so the web app and scheduled cron jobs share the same connection."
+                : "An administrator connects QuickBooks. You can still read receipts and reconcile."}
             </p>
           </div>
         )}
@@ -246,6 +256,7 @@ APP_URL=http://localhost:5174`}
                 <h2 className="font-medium text-dark">
                   {connection?.ok ? "Connected" : "Connection issue"}
                 </h2>
+                {canManageQuickBooks ? (
                 <Form method="post" action={postAction}>
                   <SubmitButton
                     intent="disconnect"
@@ -255,6 +266,7 @@ APP_URL=http://localhost:5174`}
                     Disconnect
                   </SubmitButton>
                 </Form>
+                ) : null}
               </div>
               {connection?.ok && (
                 <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">

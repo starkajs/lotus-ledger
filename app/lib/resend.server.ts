@@ -8,7 +8,11 @@ import {
   buildEmailChangeEmailContent,
   type EmailChangeEmailParams,
 } from "./email-change-email.server";
-import { buildInviteEmailContent, type InviteEmailParams } from "./invite-email.server";
+import {
+  buildInviteEmailContent,
+  buildPasswordResetEmailContent,
+  type InviteEmailParams,
+} from "./invite-email.server";
 import {
   buildIntegrationsCronReportEmailContent,
   type IntegrationsCronReportEmailParams,
@@ -44,6 +48,30 @@ export async function sendUserInviteEmail(
 ): Promise<{ id: string }> {
   const resend = getResendClient();
   const { subject, html, text } = buildInviteEmailContent(params);
+
+  const { data, error } = await resend.emails.send({
+    from: getResendFromAddress(),
+    to: params.to,
+    subject,
+    html,
+    text,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data?.id) {
+    throw new Error("Resend did not return an email id");
+  }
+
+  return { id: data.id };
+}
+
+export async function sendPasswordResetEmail(
+  params: InviteEmailParams,
+): Promise<{ id: string }> {
+  const resend = getResendClient();
+  const { subject, html, text } = buildPasswordResetEmailContent(params);
 
   const { data, error } = await resend.emails.send({
     from: getResendFromAddress(),

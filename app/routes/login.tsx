@@ -1,12 +1,18 @@
 import { Form, Link, redirect, useSearchParams } from "react-router";
 import type { Route } from "./+types/login";
 import { SubmitButton } from "~/components/submit-button";
-import { recordLoginEvent } from "~/lib/auth-audit.server";
+import {
+  isLoginLocked,
+  LOGIN_LOCKOUT_MESSAGE,
+  recordLoginEvent,
+} from "~/lib/auth-audit.server";
 import { getClientIp, getUserAgent } from "~/lib/http.server";
-import { verifyPassword } from "~/lib/password.server";
+import { rejectUnknownPassword, verifyPassword } from "~/lib/password.server";
+import { safeRedirectPath } from "~/lib/redirect";
 import {
   createSessionCookie,
   createUserSession,
+  PASSWORD_CHANGE_PATH,
   redirectIfAuthenticated,
 } from "~/lib/session.server";
 import { getUserByEmail, updateLastLogin } from "~/lib/users.server";
@@ -20,7 +26,7 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
-  const redirectTo = url.searchParams.get("redirectTo") ?? "/home";
+  const redirectTo = safeRedirectPath(url.searchParams.get("redirectTo"));
   await redirectIfAuthenticated(request, redirectTo);
   return { redirectTo };
 }
@@ -29,7 +35,7 @@ export async function action({ request }: Route.ActionArgs) {
   const form = await request.formData();
   const email = String(form.get("email") ?? "").trim().toLowerCase();
   const password = String(form.get("password") ?? "");
-  const redirectTo = String(form.get("redirectTo") ?? "/home");
+  const redirectTo = safeRedirectPath(String(form.get("redirectTo") ?? "/home"));
 
   if (!email || !password) {
     return { error: "Email and password are required" };
@@ -39,7 +45,20 @@ export async function action({ request }: Route.ActionArgs) {
   const ip = getClientIp(request);
   const ua = getUserAgent(request);
 
-  if (!user || !user.isActive) {
+  if (await isLoginLocked(email)) {
+    await rejectUnknownPassword(password);
+    await recordLoginEvent({
+      email,
+      eventType: "login_failed",
+      ipAddress: ip,
+      userAgent: ua,
+    });
+    return { error: LOGIN_LOCKOUT_MESSAGE };
+  }
+
+  const activeUser = user?.isActive ? user : null;
+  if (!activeUser) {
+    await rejectUnknownPassword(password);
     await recordLoginEvent({
       email,
       eventType: "login_failed",
@@ -49,10 +68,10 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: "Invalid email or password" };
   }
 
-  const valid = await verifyPassword(password, user.passwordHash);
+  const valid = await verifyPassword(password, activeUser.passwordHash);
   if (!valid) {
     await recordLoginEvent({
-      userId: user.id,
+      userId: activeUser.id,
       email,
       eventType: "login_failed",
       ipAddress: ip,
@@ -61,18 +80,21 @@ export async function action({ request }: Route.ActionArgs) {
     return { error: "Invalid email or password" };
   }
 
-  await updateLastLogin(user.id);
+  await updateLastLogin(activeUser.id);
   await recordLoginEvent({
-    userId: user.id,
+    userId: activeUser.id,
     email,
     eventType: "login_success",
     ipAddress: ip,
     userAgent: ua,
   });
 
-  const sessionId = await createUserSession(request, user.id);
+  const sessionId = await createUserSession(request, activeUser.id);
+  const destination = activeUser.mustChangePassword
+    ? `${PASSWORD_CHANGE_PATH}?redirectTo=${encodeURIComponent(redirectTo)}`
+    : redirectTo;
 
-  throw redirect(redirectTo, {
+  throw redirect(destination, {
     headers: { "Set-Cookie": createSessionCookie(sessionId) },
   });
 }

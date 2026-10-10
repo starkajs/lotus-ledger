@@ -15,7 +15,7 @@ import {
 } from "~/lib/stripe-quickbooks-push-diagnostics.server";
 import type { StripeQuickBooksPushPlan } from "~/lib/stripe-quickbooks-push-plan.server";
 import { getStripeBalanceTransactionByPreviewRef } from "~/lib/stripe-balance-transactions.server";
-import { requireUser } from "~/lib/session.server";
+import { adminPermissionError, isAdmin, requireUser } from "~/lib/session.server";
 
 const TRANSACTIONS_PATH = "/integrations/stripe/transactions";
 const PUSH_PATH = "/integrations/stripe/transactions/quickbooks-push";
@@ -28,7 +28,7 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const url = new URL(request.url);
   const previewId = url.searchParams.get("preview")?.trim() ?? "";
 
@@ -72,15 +72,20 @@ export async function loader({ request }: Route.LoaderArgs) {
     previewItemDiagnostics,
     previewPushed,
     previewQuickbooksSalesReceiptId,
+    canPushToQuickBooks: isAdmin(user),
   };
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
+  const denied = adminPermissionError(user);
 
   if (intent === "push") {
+    if (denied) {
+      return { scope: "push" as const, error: denied };
+    }
     const transactionId = String(form.get("transactionId") ?? "").trim();
     const preview = String(form.get("preview") ?? "").trim();
     if (!transactionId) {
@@ -112,6 +117,9 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "clear-qb-push") {
+    if (denied) {
+      return { scope: "clear-qb-push" as const, error: denied };
+    }
     const transactionId = String(form.get("transactionId") ?? "").trim();
     const preview = String(form.get("preview") ?? "").trim();
     if (!transactionId) {
@@ -146,6 +154,7 @@ export default function StripeQuickBooksPushPage({
     previewItemDiagnostics,
     previewPushed,
     previewQuickbooksSalesReceiptId,
+    canPushToQuickBooks,
   } = loaderData;
 
   return (
@@ -446,7 +455,7 @@ export default function StripeQuickBooksPushPage({
                 ). Clear the flag to push again.
               </p>
             )}
-            {previewTxnId && (
+            {previewTxnId && canPushToQuickBooks && (
               <div className="mt-2 flex flex-wrap items-center gap-3">
                 {previewPushed ? (
                   <Form method="post">

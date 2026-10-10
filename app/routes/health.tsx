@@ -15,7 +15,6 @@ export async function loader({ request }: Route.LoaderArgs) {
       : database.error === "not_configured"
         ? ("not_configured" as const)
         : ("error" as const),
-    databaseError: database.ok ? undefined : database.error,
   };
 
   const httpStatus =
@@ -29,7 +28,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function Health({ loaderData }: Route.ComponentProps) {
-  const { status, timestamp, database, databaseError, httpStatus } = loaderData;
+  const { status, timestamp, database, httpStatus } = loaderData;
   const ok = httpStatus === 200;
 
   return (
@@ -53,12 +52,6 @@ export default function Health({ loaderData }: Route.ComponentProps) {
           <dt className="text-ink-faint">Database</dt>
           <dd className="mt-1 capitalize text-dark">{database}</dd>
         </div>
-        {databaseError && (
-          <div>
-            <dt className="text-ink-faint">Database error</dt>
-            <dd className="mt-1 text-maroon">{databaseError}</dd>
-          </div>
-        )}
       </dl>
       <p className="mt-8 text-xs text-ink-muted">
         JSON: request with{" "}

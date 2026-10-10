@@ -17,7 +17,7 @@ import {
   STRIPE_TRANSACTIONS_PAGE_SIZE,
   type StripeBalanceTransactionRecord,
 } from "~/lib/stripe-balance-transactions.server";
-import { requireUser } from "~/lib/session.server";
+import { adminPermissionError, isAdmin, requireUser } from "~/lib/session.server";
 import { listStripeConnections } from "~/lib/stripe-connections.server";
 import {
   bulkSetStripeTransactionsProductManual,
@@ -188,7 +188,7 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const url = new URL(request.url);
   const connections = await listStripeConnections();
   const defaultAccount = connections[0]?.id ?? "";
@@ -221,6 +221,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     qbConnected,
     catalogProducts,
     bulkAssigned,
+    canPushToQuickBooks: isAdmin(user),
     ...txList,
   };
 }
@@ -305,6 +306,10 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "push-qb-bulk") {
+    const denied = adminPermissionError(user);
+    if (denied) {
+      return { scope: "push-qb-bulk" as const, error: denied };
+    }
     if (!(await getQuickBooksTokens())) {
       return {
         scope: "push-qb-bulk" as const,
@@ -539,6 +544,7 @@ export default function StripeTransactionsPage({
               Re-classify
             </SubmitButton>
           </Form>
+          {loaderData.canPushToQuickBooks ? (
           <Form method="post" action={postAction} className="flex flex-wrap items-center gap-2">
             <SubmitButton
               intent="push-qb-bulk"
@@ -552,6 +558,7 @@ export default function StripeTransactionsPage({
               All {total} in filter · skips rows that are not ready
             </span>
           </Form>
+          ) : null}
         </div>
       )}
 

@@ -1,16 +1,21 @@
-import { randomBytes } from "node:crypto";
 import { getDb } from "~/db";
 import { users } from "~/db/schema";
 import { getAppUrl } from "./env.server";
 import { buildInviteEmailContent } from "./invite-email.server";
+import {
+  generateTemporaryPassword,
+  hashPassword,
+  passwordPolicyError,
+} from "./password.server";
 import { isResendConfigured, sendUserInviteEmail } from "./resend.server";
-import { hashPassword } from "./password.server";
+import type { UserRole } from "./session.server";
 import { getUserByEmail } from "./users.server";
 
 export type InviteUserInput = {
   email: string;
   password?: string;
   name?: string | null;
+  role?: UserRole;
   sendEmail?: boolean;
 };
 
@@ -23,15 +28,14 @@ export type InviteUserResult = {
   temporaryPassword?: string;
 };
 
-export function generateTemporaryPassword(): string {
-  return randomBytes(12).toString("base64url");
-}
-
 export async function inviteUser(input: InviteUserInput): Promise<InviteUserResult> {
   const email = input.email.trim().toLowerCase();
   const name = input.name?.trim() || null;
   const password = input.password?.trim() || generateTemporaryPassword();
+  const role: UserRole = input.role === "admin" ? "admin" : "member";
   const shouldSendEmail = input.sendEmail ?? isResendConfigured();
+  const policy = passwordPolicyError(password);
+  if (policy) throw new Error(policy);
 
   const existing = await getUserByEmail(email);
   if (existing) {
@@ -46,6 +50,8 @@ export async function inviteUser(input: InviteUserInput): Promise<InviteUserResu
       email,
       passwordHash,
       name,
+      role,
+      mustChangePassword: true,
       isActive: true,
     })
     .returning({ id: users.id, email: users.email, name: users.name });

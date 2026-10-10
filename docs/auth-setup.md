@@ -52,9 +52,12 @@ With `RESEND_API_KEY` and `RESEND_FROM` set:
 
 ```bash
 npm run invite-user -- colleague@example.com "temporary-password" "Their Name"
+npm run invite-user -- colleague@example.com "temporary-password" "Their Name" --admin
 ```
 
-Or use **Users** at `/users` while logged in (checkbox to send email when Resend is configured).
+Passwords must be at least 12 characters. New users are members unless `--admin` is set. They must choose a new password on first sign-in.
+
+Or use **Users** at `/users` while logged in as an administrator.
 
 ### Without email
 
@@ -63,6 +66,21 @@ npm run invite-user -- user@example.com "temporary-password" --no-email
 ```
 
 Share the password securely yourself.
+
+## Roles
+
+- **Administrator** — invite and delete users, reset passwords, add or remove Stripe keys, connect or disconnect QuickBooks, and push receipts.
+- **Member** — read the ledger and reconcile (classify, assign products, sync from Stripe and WooCommerce).
+
+The migration marks every existing user as an administrator. The seeded first user is an administrator. Later invites default to member.
+
+Deleting a user removes their login only. Stripe connections they added stay, with `added_by_user_id` set to null.
+
+## Passwords
+
+- Account → Password, or `/account/password`.
+- An administrator can reset someone else's password from Users. That signs them out and forces a new password on the next sign-in.
+- Changing or resetting a password deletes that user's sessions.
 
 ## Sessions and audit
 
@@ -76,4 +94,4 @@ After login, open `/integrations/stripe` to add one or more Stripe accounts. Sec
 
 ## Protected routes
 
-All `/integrations/*` and `/api/*` routes require an authenticated session. Unauthenticated visitors are redirected to `/login`.
+Signed-in routes require a session. Unauthenticated visitors are redirected to `/login`. Login only accepts a same-site path in `redirectTo`. Administrator actions reject members even if the form is posted directly.

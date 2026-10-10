@@ -6,16 +6,34 @@ import { sessions, users } from "~/db/schema";
 import { recordLoginEvent } from "./auth-audit.server";
 import { getClientIp, getCookie, getUserAgent } from "./http.server";
 import { getOAuthStateSecret } from "./env.server";
+import { safeRedirectPath } from "./redirect";
 
 const SESSION_COOKIE = "lotus_session";
 const SESSION_DAYS = 30;
+export const PASSWORD_CHANGE_PATH = "/account/password";
+
+export type UserRole = "admin" | "member";
 
 export type AuthUser = {
   id: string;
   email: string;
   name: string | null;
   lastLoginAt: string | null;
+  role: UserRole;
+  mustChangePassword: boolean;
 };
+
+export function isAdmin(user: AuthUser): boolean {
+  return user.role === "admin";
+}
+
+export function adminPermissionError(user: AuthUser): string | null {
+  return isAdmin(user) ? null : "You do not have permission to do that.";
+}
+
+function asRole(value: string): UserRole {
+  return value === "admin" ? "admin" : "member";
+}
 
 function signSessionId(sessionId: string): string {
   const signature = createHmac("sha256", getOAuthStateSecret())
@@ -74,6 +92,11 @@ export async function createUserSession(
   return rows[0].id;
 }
 
+export async function destroyAllSessionsForUser(userId: string): Promise<void> {
+  const db = getDb();
+  await db.delete(sessions).where(eq(sessions.userId, userId));
+}
+
 export async function destroyUserSession(
   request: Request,
   options?: { recordLogout?: boolean; user?: AuthUser | null },
@@ -119,6 +142,8 @@ export async function getUserFromRequest(
       userId: users.id,
       email: users.email,
       name: users.name,
+      role: users.role,
+      mustChangePassword: users.mustChangePassword,
       isActive: users.isActive,
       lastLoginAt: users.lastLoginAt,
     })
@@ -139,16 +164,37 @@ export async function getUserFromRequest(
     id: row.userId,
     email: row.email,
     name: row.name,
+    role: asRole(row.role),
+    mustChangePassword: row.mustChangePassword,
     lastLoginAt: row.lastLoginAt?.toISOString() ?? null,
   };
+}
+
+function mustChangePasswordAllowed(request: Request): boolean {
+  return new URL(request.url).pathname === PASSWORD_CHANGE_PATH;
 }
 
 export async function requireUser(request: Request): Promise<AuthUser> {
   const user = await getUserFromRequest(request);
   if (!user) {
     const url = new URL(request.url);
-    const redirectTo = encodeURIComponent(url.pathname + url.search);
+    const redirectTo = encodeURIComponent(safeRedirectPath(url.pathname + url.search));
     throw redirect(`/login?redirectTo=${redirectTo}`);
+  }
+  if (user.mustChangePassword && !mustChangePasswordAllowed(request)) {
+    const url = new URL(request.url);
+    const next = safeRedirectPath(url.pathname + url.search);
+    throw redirect(
+      `${PASSWORD_CHANGE_PATH}?redirectTo=${encodeURIComponent(next)}`,
+    );
+  }
+  return user;
+}
+
+export async function requireAdmin(request: Request): Promise<AuthUser> {
+  const user = await requireUser(request);
+  if (!isAdmin(user)) {
+    throw new Response("You do not have access to this page.", { status: 403 });
   }
   return user;
 }
@@ -158,7 +204,9 @@ export async function redirectIfAuthenticated(
   redirectTo = "/home",
 ) {
   const user = await getUserFromRequest(request);
-  if (user) throw redirect(redirectTo);
+  if (!user) return;
+  if (user.mustChangePassword) throw redirect(PASSWORD_CHANGE_PATH);
+  throw redirect(safeRedirectPath(redirectTo));
 }
 
 export async function cleanupExpiredSessions(): Promise<void> {

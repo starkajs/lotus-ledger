@@ -11,6 +11,20 @@ import type { Route } from "./+types/root";
 import { CookieConsentProvider } from "./components/cookie-consent-provider";
 import "./app.css";
 
+const SECURITY_HEADERS = {
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+} as const;
+
+export const headers: Route.HeadersFunction = ({ parentHeaders }) => {
+  const headers = new Headers(parentHeaders);
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+    headers.set(name, value);
+  }
+  return headers;
+};
+
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
   {
@@ -54,14 +68,18 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   let stack: string | undefined;
 
   if (isRouteErrorResponse(error)) {
-    message = error.status === 404 ? "404" : "Error";
+    message = error.status === 404 ? "Page not found" : "Something went wrong";
     details =
       error.status === 404
         ? "The requested page could not be found."
-        : error.statusText || details;
-  } else if (import.meta.env.DEV && error && error instanceof Error) {
-    details = error.message;
-    stack = error.stack;
+        : error.statusText ||
+          "The server rejected this request. The detail is in the Fly logs.";
+  } else if (error && error instanceof Error) {
+    message = "Something went wrong";
+    details = import.meta.env.DEV
+      ? error.message
+      : "This page hit an unexpected error. The detail is in the Fly logs.";
+    if (import.meta.env.DEV) stack = error.stack;
   }
 
   return (

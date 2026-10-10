@@ -17,6 +17,10 @@ export const users = pgTable("users", {
   email: text().notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   name: text(),
+  /** `admin` manages users, credentials, and QuickBooks pushes. `member` reads and reconciles. */
+  role: text().notNull().default("member"),
+  /** Set for invites and admin resets. Cleared when the user chooses their own password. */
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
   invitedAt: timestamp("invited_at", { withTimezone: true }).notNull().defaultNow(),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
@@ -81,9 +85,9 @@ export const stripeConnections = pgTable("stripe_connections", {
   quickbooksPaymentRefTemplate: text("quickbooks_payment_ref_template"),
   /** Template for CustomerMemo (message on receipt). */
   quickbooksCustomerMemoTemplate: text("quickbooks_customer_memo_template"),
-  addedByUserId: uuid("added_by_user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "restrict" }),
+  addedByUserId: uuid("added_by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

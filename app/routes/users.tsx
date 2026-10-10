@@ -4,9 +4,11 @@ import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
 import { requestEmailChange } from "~/lib/email-change.server";
 import { inviteUser } from "~/lib/invite.server";
-import { isResendConfigured } from "~/lib/resend.server";
-import { requireUser } from "~/lib/session.server";
-import { deleteUser, listUsers } from "~/lib/users.server";
+import { resetUserPassword } from "~/lib/password.server";
+import { getAppUrl } from "~/lib/env.server";
+import { isResendConfigured, sendPasswordResetEmail } from "~/lib/resend.server";
+import { requireAdmin } from "~/lib/session.server";
+import { deleteUser, getUserById, listUsers } from "~/lib/users.server";
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -16,7 +18,7 @@ export function meta({}: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const currentUser = await requireUser(request);
+  const currentUser = await requireAdmin(request);
   const users = await listUsers();
   return {
     users,
@@ -26,7 +28,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const currentUser = await requireUser(request);
+  const currentUser = await requireAdmin(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
 
@@ -75,10 +77,72 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
+  if (intent === "resetPassword") {
+    const userId = String(form.get("userId") ?? "");
+    if (!userId) {
+      return { scope: "resetPassword" as const, error: "User id is required" };
+    }
+    if (userId === currentUser.id) {
+      return {
+        scope: "resetPassword" as const,
+        error: "Change your own password from Account.",
+      };
+    }
+    try {
+      const temporaryPassword = await resetUserPassword(userId);
+      const target = await getUserById(userId);
+      if (!target) {
+        return { scope: "resetPassword" as const, error: "User not found" };
+      }
+      if (isResendConfigured()) {
+        try {
+          await sendPasswordResetEmail({
+            to: target.email,
+            name: target.name,
+            email: target.email,
+            temporaryPassword,
+            loginUrl: `${getAppUrl()}/login`,
+          });
+          return {
+            scope: "resetPassword" as const,
+            success: true as const,
+            email: target.email,
+            emailSent: true as const,
+          };
+        } catch (err) {
+          return {
+            scope: "resetPassword" as const,
+            success: true as const,
+            email: target.email,
+            emailSent: false as const,
+            temporaryPassword,
+            error:
+              err instanceof Error
+                ? `Password was reset, but the email failed: ${err.message}`
+                : "Password was reset, but the email failed.",
+          };
+        }
+      }
+      return {
+        scope: "resetPassword" as const,
+        success: true as const,
+        email: target.email,
+        emailSent: false as const,
+        temporaryPassword,
+      };
+    } catch (err) {
+      return {
+        scope: "resetPassword" as const,
+        error: err instanceof Error ? err.message : "Failed to reset password",
+      };
+    }
+  }
+
   if (intent === "invite") {
     const email = String(form.get("email") ?? "").trim();
     const name = String(form.get("name") ?? "").trim() || null;
     const password = String(form.get("password") ?? "").trim();
+    const role = form.get("role") === "admin" ? "admin" : "member";
     const sendEmail = form.get("sendEmail") === "on";
 
     if (!email) {
@@ -89,6 +153,7 @@ export async function action({ request }: Route.ActionArgs) {
       const result = await inviteUser({
         email,
         name,
+        role,
         password: password || undefined,
         sendEmail,
       });
@@ -195,6 +260,20 @@ export default function UsersPage({
               />
             </div>
             <div>
+              <label htmlFor="role" className="block text-sm font-medium text-dark">
+                Role
+              </label>
+              <select
+                id="role"
+                name="role"
+                defaultValue="member"
+                className="mt-1 w-full rounded-jamyang border border-sand-dark/60 bg-surface px-3 py-2 text-dark focus:border-teal focus:outline-none focus:ring-1 focus:ring-teal"
+              >
+                <option value="member">Member — read and reconcile</option>
+                <option value="admin">Administrator — users, keys, and QuickBooks push</option>
+              </select>
+            </div>
+            <div>
               <label
                 htmlFor="password"
                 className="block text-sm font-medium text-dark"
@@ -208,6 +287,7 @@ export default function UsersPage({
                 type="text"
                 autoComplete="off"
                 placeholder="Leave blank to generate"
+                minLength={12}
                 className="mt-1 w-full rounded-jamyang border border-sand-dark/60 bg-surface px-3 py-2 font-mono text-sm focus:border-teal focus:outline-none focus:ring-1 focus:ring-teal"
               />
             </div>
@@ -268,6 +348,37 @@ export default function UsersPage({
               {actionData.error}
             </p>
           )}
+          {actionData?.scope === "resetPassword" && actionData.success && (
+            <div
+              role="status"
+              className="mt-3 rounded-jamyang border border-jade/40 bg-jade/5 px-4 py-3 text-sm text-dark"
+            >
+              <p>
+                Password reset for {actionData.email}.
+                {actionData.emailSent
+                  ? " A temporary password was emailed."
+                  : " They must sign in with the temporary password below and choose a new one."}
+              </p>
+              {actionData.temporaryPassword ? (
+                <p className="mt-2">
+                  Temporary password:{" "}
+                  <code className="rounded bg-sand px-1.5 py-0.5 font-mono text-dark">
+                    {actionData.temporaryPassword}
+                  </code>
+                </p>
+              ) : null}
+              {actionData.error ? (
+                <p className="mt-2 text-maroon">{actionData.error}</p>
+              ) : null}
+            </div>
+          )}
+          {actionData?.scope === "resetPassword" &&
+            !actionData.success &&
+            actionData.error && (
+              <p role="alert" className="mt-3 text-sm text-maroon">
+                {actionData.error}
+              </p>
+            )}
 
           {users.length === 0 ? (
             <p className="mt-4 text-sm text-ink-muted">No users yet.</p>
@@ -278,6 +389,7 @@ export default function UsersPage({
                   <tr>
                     <th className="px-4 py-3 font-medium">Name</th>
                     <th className="px-4 py-3 font-medium">Email</th>
+                    <th className="px-4 py-3 font-medium">Role</th>
                     <th className="px-4 py-3 font-medium">Invited</th>
                     <th className="px-4 py-3 font-medium">Last login</th>
                     <th className="px-4 py-3 font-medium text-right">Actions</th>
@@ -295,6 +407,9 @@ export default function UsersPage({
                           )}
                         </td>
                         <td className="px-4 py-3 text-ink-muted">{user.email}</td>
+                        <td className="px-4 py-3 capitalize text-ink-muted">
+                          {user.role}
+                        </td>
                         <td className="px-4 py-3 whitespace-nowrap text-ink-muted">
                           {formatDate(user.invitedAt)}
                         </td>
@@ -311,6 +426,33 @@ export default function UsersPage({
                             </Link>
                           ) : (
                             <div className="flex flex-col items-end gap-2">
+                              <Form method="post" className="inline">
+                                <input
+                                  type="hidden"
+                                  name="intent"
+                                  value="resetPassword"
+                                />
+                                <input type="hidden" name="userId" value={user.id} />
+                                <SubmitButton
+                                  intent="resetPassword"
+                                  matchField="userId"
+                                  matchValue={user.id}
+                                  variant="outline"
+                                  className="!px-2.5 !py-1 text-xs"
+                                  loadingLabel="Resetting…"
+                                  onClick={(e) => {
+                                    if (
+                                      !confirm(
+                                        `Reset the password for ${user.email}? They will be signed out and must choose a new password.`,
+                                      )
+                                    ) {
+                                      e.preventDefault();
+                                    }
+                                  }}
+                                >
+                                  Reset password
+                                </SubmitButton>
+                              </Form>
                               {resendConfigured ? (
                                 <Form
                                   method="post"

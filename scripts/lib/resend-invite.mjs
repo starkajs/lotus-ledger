@@ -18,7 +18,7 @@ Sign in at: ${loginUrl}
 Email: ${email}
 Temporary password: ${temporaryPassword}
 
-Please sign in and change your password when password management is available.
+Sign in and you will be asked to choose a new password before you can use Lotus Ledger.
 
 — Lotus Ledger`;
 
@@ -30,7 +30,7 @@ Please sign in and change your password when password management is available.
   <p><a href="${loginUrl}" style="color: #0d6e6e;">Sign in to Lotus Ledger</a></p>
   <p><strong>Email:</strong> ${escapeHtml(email)}<br>
   <strong>Temporary password:</strong> <code style="background: #f5f0e8; padding: 0.15rem 0.4rem;">${escapeHtml(temporaryPassword)}</code></p>
-  <p style="font-size: 0.875rem; color: #6b5d4f;">Keep this email private.</p>
+  <p style="font-size: 0.875rem; color: #6b5d4f;">Sign in and you will be asked to choose a new password before you can use Lotus Ledger. Keep this email private.</p>
   <p style="font-size: 0.875rem; color: #6b5d4f;">— Lotus Ledger</p>
 </body>
 </html>`;

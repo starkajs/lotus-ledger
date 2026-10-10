@@ -1,15 +1,21 @@
-import { desc, eq } from "drizzle-orm";
+import { count, desc, eq } from "drizzle-orm";
 import { getDb } from "~/db";
-import { stripeConnections, users } from "~/db/schema";
+import { users } from "~/db/schema";
+import type { UserRole } from "./session.server";
 
 export type UserListItem = {
   id: string;
   email: string;
   name: string | null;
+  role: UserRole;
   isActive: boolean;
   invitedAt: string;
   lastLoginAt: string | null;
 };
+
+function asRole(value: string): UserRole {
+  return value === "admin" ? "admin" : "member";
+}
 
 export async function getUserByEmail(email: string) {
   const db = getDb();
@@ -38,6 +44,7 @@ export async function listUsers(): Promise<UserListItem[]> {
       id: users.id,
       email: users.email,
       name: users.name,
+      role: users.role,
       isActive: users.isActive,
       invitedAt: users.invitedAt,
       lastLoginAt: users.lastLoginAt,
@@ -49,6 +56,7 @@ export async function listUsers(): Promise<UserListItem[]> {
     id: row.id,
     email: row.email,
     name: row.name,
+    role: asRole(row.role),
     isActive: row.isActive,
     invitedAt: row.invitedAt.toISOString(),
     lastLoginAt: row.lastLoginAt?.toISOString() ?? null,
@@ -65,7 +73,7 @@ export async function deleteUser(
 
   const db = getDb();
   const target = await db
-    .select({ id: users.id })
+    .select({ id: users.id, role: users.role })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
@@ -74,9 +82,15 @@ export async function deleteUser(
     throw new Error("User not found");
   }
 
-  await db
-    .delete(stripeConnections)
-    .where(eq(stripeConnections.addedByUserId, userId));
+  if (target[0].role === "admin") {
+    const [admins] = await db
+      .select({ value: count() })
+      .from(users)
+      .where(eq(users.role, "admin"));
+    if ((admins?.value ?? 0) <= 1) {
+      throw new Error("You cannot delete the last administrator.");
+    }
+  }
 
   const removed = await db
     .delete(users)

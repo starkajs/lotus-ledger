@@ -19,7 +19,8 @@ import { getQuickBooksTokens } from "~/lib/quickbooks-tokens.server";
 import { clearStripeTransactionQuickBooksPush } from "~/lib/stripe-quickbooks-push-execute.server";
 import { getStripeBalanceTransactionById } from "~/lib/stripe-balance-transactions.server";
 import { planStripeQuickBooksPushForTransaction } from "~/lib/stripe-quickbooks-push-plan.server";
-import { requireUser } from "~/lib/session.server";
+import { safeRedirectPath } from "~/lib/redirect";
+import { adminPermissionError, isAdmin, requireUser } from "~/lib/session.server";
 import {
   findLinkedWooCommerceOrderForStripeTransaction,
   setStripeTransactionProductFromWooCommerceOrder,
@@ -85,7 +86,7 @@ export function meta({ data }: Route.MetaArgs) {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
 
   const tx = await getStripeBalanceTransactionById(params.transactionId);
   if (!tx) {
@@ -107,8 +108,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     : null;
 
   const url = new URL(request.url);
-  const returnTo =
-    url.searchParams.get("returnTo") ?? "/integrations/stripe/transactions";
+  const returnTo = safeRedirectPath(
+    url.searchParams.get("returnTo"),
+    "/integrations/stripe/transactions",
+  );
 
   const stripeDashboardHost = tx.livemode
     ? "https://dashboard.stripe.com"
@@ -196,6 +199,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     linkedWcOrderFull,
     wcLotusProductForCopy,
     stripeUnmatched,
+    canClearQuickBooksPush: isAdmin(user),
   };
 }
 
@@ -203,7 +207,10 @@ export async function action({ request, params }: Route.ActionArgs) {
   const user = await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
-  const returnTo = String(form.get("returnTo") ?? "/integrations/stripe/transactions");
+  const returnTo = safeRedirectPath(
+    String(form.get("returnTo") ?? ""),
+    "/integrations/stripe/transactions",
+  );
 
   const detailPath = `/integrations/stripe/transactions/${params.transactionId}`;
   const redirectUrl = `${detailPath}?returnTo=${encodeURIComponent(returnTo)}`;
@@ -237,6 +244,10 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   if (intent === "clear-qb-push") {
+    const denied = adminPermissionError(user);
+    if (denied) {
+      return { scope: "clearQbPush" as const, error: denied };
+    }
     const result = await clearStripeTransactionQuickBooksPush(params.transactionId);
     if (!result.ok) {
       return { scope: "clearQbPush" as const, error: result.reason };
@@ -289,6 +300,7 @@ export default function StripeTransactionDetailPage({
     stripeUnmatched,
     linkedQuickBooksSalesReceipt,
     linkedQuickBooksRefundReceipt,
+    canClearQuickBooksPush,
   } = loaderData;
   const location = useLocation();
   const postAction = location.pathname + location.search;
@@ -628,9 +640,10 @@ export default function StripeTransactionDetailPage({
               ) : (
                 "Not pushed"
               )}
-              {tx.pushedToQuickbooks === true ||
+              {canClearQuickBooksPush &&
+              (tx.pushedToQuickbooks === true ||
               tx.quickbooksSalesReceiptId ||
-              tx.quickbooksRefundReceiptId ? (
+              tx.quickbooksRefundReceiptId) ? (
                 <Form method="post" action={postAction} className="inline">
                   <input type="hidden" name="returnTo" value={returnTo} />
                   <SubmitButton

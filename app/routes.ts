@@ -8,7 +8,9 @@ export default [
   route("confirm-email-change", "routes/confirm-email-change.tsx"),
   layout("routes/authenticated-layout.tsx", [
     route("home", "routes/app.home.tsx"),
+    route("account/password", "routes/account.password.tsx"),
     route("account", "routes/account.tsx"),
+    route("changelog", "routes/changelog.tsx"),
     route("community", "routes/community.tsx"),
     route("community/:memberId", "routes/community.$memberId.tsx"),
     route("products", "routes/products.tsx"),

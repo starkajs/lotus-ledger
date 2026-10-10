@@ -2,6 +2,7 @@
 .env
 .data/
 /node_modules/
+/backups/
 
 # React Router
 /.react-router/

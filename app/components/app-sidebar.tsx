@@ -63,6 +63,7 @@ const navItems: NavItem[] = [
     child: true,
   },
   { to: "/integrations/jobs", label: "Job history" },
+  { to: "/changelog", label: "Changelog" },
   { to: "/users", label: "Users" },
 ];
 
@@ -85,6 +86,12 @@ function navClassName({
 
 export function AppSidebar({ user }: { user: AuthUser }) {
   const { pathname } = useLocation();
+  const items = user.mustChangePassword
+    ? []
+    : navItems.filter((item) => {
+        if (user.role === "admin") return true;
+        return item.to !== "/users" && item.to !== STRIPE_QB_PUSH_PATH;
+      });
 
   return (
     <aside className="flex h-dvh w-56 shrink-0 flex-col border-r border-sand-dark/40 bg-surface-overlay">
@@ -102,7 +109,12 @@ export function AppSidebar({ user }: { user: AuthUser }) {
         className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-3"
         aria-label="Main"
       >
-        {navItems.map(({ to, label, end, child, isActive: isActiveFn }) => (
+        {user.mustChangePassword ? (
+          <p className="px-3 py-2 text-sm text-ink-muted">
+            Choose a new password to continue.
+          </p>
+        ) : null}
+        {items.map(({ to, label, end, child, isActive: isActiveFn }) => (
           <NavLink
             key={to}
             to={to}
@@ -124,10 +136,10 @@ export function AppSidebar({ user }: { user: AuthUser }) {
           {user.name ?? user.email}
         </p>
         <NavLink
-          to="/account"
+          to={user.mustChangePassword ? "/account/password" : "/account"}
           className="block rounded-jamyang px-3 py-2 text-xs font-medium text-ink-muted hover:bg-sand/50 hover:text-dark"
         >
-          Account
+          {user.mustChangePassword ? "Choose a password" : "Account"}
         </NavLink>
         <NavLink
           to="/logout"
