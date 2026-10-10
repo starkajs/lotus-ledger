@@ -332,8 +332,9 @@ APP_URL=http://localhost:5174`}
                     <h2 className="text-xl">QuickBooks data</h2>
                     <p className="mt-2 max-w-xl text-sm text-ink-muted">
                       Refresh all pulls accounts, classes, VAT codes, products
-                      and services, payment methods, and the last 30 days of
-                      sales and refund receipts.
+                      and services, payment methods, and sales and refund
+                      receipts. Receipts cover the last 30 days, or from the
+                      newest receipt already stored when that is older.
                     </p>
                   </div>
                   <Form method="post" action={postAction}>

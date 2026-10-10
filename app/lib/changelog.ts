@@ -21,6 +21,17 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-receipt-catchup",
+    shipped: "2026-10-10",
+    title: "Sales and refund receipt refresh catches up",
+    changes: [
+      "Refreshing sales receipts or refund receipts now starts from the newest receipt already stored when that is older than 30 days, so a gap is filled.",
+      "Last refreshed shows when that refresh finished, including a refresh that finds no new receipts.",
+    ],
+    commit: "",
+    parent: "469eb0ab84edd134f09d30c31271fe79a44febba",
+  },
+  {
     id: "2026-10-10-quickbooks-refresh-all",
     shipped: "2026-10-10",
     title: "Refresh all QuickBooks data",

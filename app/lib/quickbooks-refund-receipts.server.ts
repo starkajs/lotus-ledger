@@ -8,6 +8,7 @@ import {
 } from "./quickbooks-sales-receipt-parse";
 import { queryQuickBooksAll } from "./quickbooks-query.server";
 import {
+  latestIntegrationJobFinishedAt,
   runIntegrationJob,
   type IntegrationAuditContext,
 } from "./integration-jobs.server";
@@ -150,8 +151,24 @@ function refundReceiptSyncSinceDate(
   days = QUICKBOOKS_REFUND_RECEIPT_SYNC_DAYS,
 ): string {
   const since = new Date();
-  since.setDate(since.getDate() - Math.floor(days));
+  since.setUTCDate(since.getUTCDate() - Math.floor(days));
   return since.toISOString().slice(0, 10);
+}
+
+function isoDateOnly(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return value.slice(0, 10);
+}
+
+function daysCovered(sinceDate: string): number {
+  return Math.max(
+    1,
+    Math.ceil(
+      (Date.now() - new Date(`${sinceDate}T00:00:00Z`).getTime()) /
+        (24 * 60 * 60 * 1000),
+    ),
+  );
 }
 
 function refundReceiptSyncQuerySince(since: string): string {
@@ -318,21 +335,22 @@ async function syncQuickBooksRefundReceiptsInner(options?: {
   sinceDate?: string;
 }): Promise<QuickBooksRefundReceiptSyncResult> {
   const realmId = await resolveRealmId();
-  const sinceDate = options?.sinceDate ?? refundReceiptSyncSinceDate();
-  const daysLimit = options?.sinceDate
-    ? Math.max(
-        1,
-        Math.ceil(
-          (Date.now() - new Date(`${sinceDate}T00:00:00Z`).getTime()) /
-            (24 * 60 * 60 * 1000),
-        ),
-      )
-    : QUICKBOOKS_REFUND_RECEIPT_SYNC_DAYS;
+  const db = getDb();
+  const rollingSince = refundReceiptSyncSinceDate();
+  let sinceDate = options?.sinceDate ?? rollingSince;
+  if (!options?.sinceDate) {
+    const [newest] = await db
+      .select({ value: max(quickbooksRefundReceipts.txnDate) })
+      .from(quickbooksRefundReceipts)
+      .where(eq(quickbooksRefundReceipts.realmId, realmId));
+    const newestDate = isoDateOnly(newest?.value);
+    if (newestDate && newestDate < rollingSince) sinceDate = newestDate;
+  }
+  const daysLimit = daysCovered(sinceDate);
   const rows = await queryQuickBooksAll<QbRefundReceiptRow>(
     refundReceiptSyncQuerySince(sinceDate),
     "RefundReceipt",
   );
-  const db = getDb();
   const syncStartedAt = new Date();
   const syncedAt = syncStartedAt;
   let created = 0;
@@ -497,16 +515,21 @@ export async function listQuickBooksRefundReceipts(
     .limit(pageSize)
     .offset(offset);
 
-  const [syncRow] = await db
-    .select({ value: max(quickbooksRefundReceipts.syncedAt) })
-    .from(quickbooksRefundReceipts)
-    .where(eq(quickbooksRefundReceipts.realmId, realmId));
+  const jobFinishedAt = await latestIntegrationJobFinishedAt(
+    "quickbooks_refund_receipts_sync",
+  );
+  const [syncRow] = jobFinishedAt
+    ? [null]
+    : await db
+        .select({ value: max(quickbooksRefundReceipts.syncedAt) })
+        .from(quickbooksRefundReceipts)
+        .where(eq(quickbooksRefundReceipts.realmId, realmId));
 
   return {
     connected: true,
     realmId,
     companyName: tokens?.companyName ?? null,
-    lastSyncedAt: syncRow?.value?.toISOString() ?? null,
+    lastSyncedAt: jobFinishedAt ?? syncRow?.value?.toISOString() ?? null,
     presence,
     receipts: rows.map(rowToRecord),
     total,

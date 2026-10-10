@@ -112,7 +112,7 @@ export default function QuickBooksSalesReceiptsPage({
   return (
     <QuickBooksMasterDataPage
       title="Sales receipts"
-      description="Last 30 days from QuickBooks. Refresh upserts by ID; receipts deleted in QuickBooks are marked removed (not deleted from Lotus Ledger)."
+      description="Refresh loads the last 30 days from QuickBooks. If the newest receipt stored here is older than that, it starts there and catches up. Receipts deleted in QuickBooks are marked removed."
       connected={loaderData.connected}
       companyName={loaderData.companyName}
       lastSyncedAt={loaderData.lastSyncedAt}

@@ -1,4 +1,4 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "~/db";
 import {
   classificationEvents,
@@ -29,6 +29,25 @@ export {
   INTEGRATION_JOB_TYPE_LABELS,
   INTEGRATION_JOB_TYPES,
 } from "~/lib/integration-jobs";
+
+/** When this job last finished, whether it completed or failed. */
+export async function latestIntegrationJobFinishedAt(
+  jobType: IntegrationJobType,
+): Promise<string | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ finishedAt: integrationJobRuns.finishedAt })
+    .from(integrationJobRuns)
+    .where(
+      and(
+        eq(integrationJobRuns.jobType, jobType),
+        inArray(integrationJobRuns.status, ["completed", "failed"]),
+      ),
+    )
+    .orderBy(desc(integrationJobRuns.finishedAt))
+    .limit(1);
+  return row?.finishedAt?.toISOString() ?? null;
+}
 
 export type ClassificationSnapshot = {
   productId: string | null;
