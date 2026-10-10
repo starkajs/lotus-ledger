@@ -22,7 +22,7 @@ ${intro}
 
 New email: ${params.newEmail}
 
-Confirm this change by opening the link below (valid for 24 hours):
+Open the link below and press Confirm. The address does not change until you do (valid for 24 hours):
 ${params.confirmUrl}
 
 If you did not request this, you can ignore this email.
@@ -36,8 +36,9 @@ If you did not request this, you can ignore this email.
   <p>${greeting},</p>
   <p>${intro}</p>
   <p>New email: <strong>${escapeHtml(params.newEmail)}</strong></p>
-  <p><a href="${params.confirmUrl}" style="display: inline-block; margin: 1rem 0; padding: 0.6rem 1.25rem; background: #6b2c2c; color: #fff; text-decoration: none; border-radius: 999px;">Confirm email change</a></p>
+  <p><a href="${params.confirmUrl}" style="display: inline-block; margin: 1rem 0; padding: 0.6rem 1.25rem; background: #6b2c2c; color: #fff; text-decoration: none; border-radius: 999px;">Review email change</a></p>
   <p style="font-size: 0.875rem; color: #6b5d4f;">Or copy this link: ${escapeHtml(params.confirmUrl)}</p>
+  <p style="font-size: 0.875rem; color: #6b5d4f;">The address changes only after you press Confirm on that page.</p>
   <p style="font-size: 0.875rem; color: #6b5d4f;">This link expires in 24 hours. If you did not request this, ignore this email.</p>
   <p style="font-size: 0.875rem; color: #6b5d4f;">— Lotus Ledger</p>
 </body>

@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import OAuthClient from "intuit-oauth";
 import {
   getAppUrl,
@@ -70,18 +70,30 @@ export function verifyOAuthState(state: string | null): boolean {
     .update(payload)
     .digest("hex");
 
-  if (signature !== expected) return false;
+  if (!signaturesMatch(signature, expected)) return false;
 
   const ageMs = Date.now() - Number(issuedAt);
   return ageMs >= 0 && ageMs <= STATE_MAX_AGE_SECONDS * 1000;
 }
 
+function signaturesMatch(actual: string, expected: string): boolean {
+  const actualBytes = Buffer.from(actual);
+  const expectedBytes = Buffer.from(expected);
+  if (actualBytes.length !== expectedBytes.length) return false;
+  return timingSafeEqual(actualBytes, expectedBytes);
+}
+
+function oauthStateCookie(value: string, maxAgeSeconds: number): string {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${OAUTH_STATE_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure}`;
+}
+
 export function getQuickBooksOAuthStateCookie(state: string): string {
-  return `${OAUTH_STATE_COOKIE}=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${STATE_MAX_AGE_SECONDS}`;
+  return oauthStateCookie(state, STATE_MAX_AGE_SECONDS);
 }
 
 export function clearQuickBooksOAuthStateCookie(): string {
-  return `${OAUTH_STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  return oauthStateCookie("", 0);
 }
 
 export function buildQuickBooksAuthorizeUrl(state: string): string {

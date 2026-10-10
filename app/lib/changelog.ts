@@ -21,6 +21,19 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-confirm",
+    shipped: "2026-10-10",
+    title: "Email confirmation and safer product rules",
+    changes: [
+      "Changing an email address now needs a Confirm button on the page. Opening the link, including from an email scanner, no longer applies the change.",
+      "Product match patterns that are too long, invalid, or too expensive to run are refused. Existing patterns of that kind are skipped.",
+      "The QuickBooks connection cookie is only sent over HTTPS.",
+      "The app image now runs on Node 22.",
+    ],
+    commit: "",
+    parent: "e3c2bf224c4605668afccfe337a99d0fe4132e58",
+  },
+  {
     id: "2026-10-10",
     shipped: "2026-10-10",
     title: "Access control and sign-in lockout",

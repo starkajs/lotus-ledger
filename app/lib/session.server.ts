@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { eq, lt } from "drizzle-orm";
 import { redirect } from "react-router";
 import { getDb } from "~/db";
@@ -52,8 +52,15 @@ function verifySignedSessionId(value: string | null): string | null {
     .update(sessionId)
     .digest("hex");
 
-  if (signature !== expected) return null;
+  if (!signaturesMatch(signature, expected)) return null;
   return sessionId;
+}
+
+function signaturesMatch(actual: string, expected: string): boolean {
+  const actualBytes = Buffer.from(actual);
+  const expectedBytes = Buffer.from(expected);
+  if (actualBytes.length !== expectedBytes.length) return false;
+  return timingSafeEqual(actualBytes, expectedBytes);
 }
 
 function sessionCookieOptions(maxAgeSeconds: number): string {

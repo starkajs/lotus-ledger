@@ -6,6 +6,7 @@ import {
   collectClassificationText,
   evaluateProductMatch,
   listActiveProductMatchRules,
+  productRulePatternError,
 } from "~/lib/product-classification.server";
 import {
   createProductMatchRule,
@@ -81,6 +82,10 @@ export async function action({ request }: Route.ActionArgs) {
     const pattern = String(form.get("pattern") ?? "").trim();
     if (!productId || !pattern) {
       return { scope: "create" as const, error: "Product and pattern are required" };
+    }
+    const patternError = productRulePatternError(matchType, pattern);
+    if (patternError) {
+      return { scope: "create" as const, error: patternError };
     }
     await createProductMatchRule({
       productId,
@@ -258,8 +263,13 @@ export default function ProductRulesPage({
                 </td>
                 <td className="px-2 py-1.5">{r.field}</td>
                 <td className="px-2 py-1.5">{r.matchType}</td>
-                <td className="px-2 py-1.5 font-mono max-w-[16rem] truncate" title={r.pattern}>
-                  {r.pattern}
+                <td className="px-2 py-1.5 font-mono max-w-[16rem]" title={r.pattern}>
+                  <span className="block truncate">{r.pattern}</span>
+                  {productRulePatternError(r.matchType, r.pattern) ? (
+                    <span className="mt-1 block font-sans text-maroon">
+                      Not applied. Replace this pattern.
+                    </span>
+                  ) : null}
                 </td>
                 <td className="px-2 py-1.5">
                   <Form method="post">
