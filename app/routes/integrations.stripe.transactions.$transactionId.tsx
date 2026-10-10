@@ -9,9 +9,15 @@ import { runIntegrationJob } from "~/lib/integration-jobs.server";
 import {
   canPushTransactionToQuickbooks,
   classifyStripeTransactionById,
+  saveProductMatchRuleAndClassifyUnmatched,
   setStripeTransactionProductManual,
 } from "~/lib/product-classification.server";
-import { extractStripeTransactionProductSignals } from "~/lib/stripe-transaction-signals";
+import {
+  extractStripeTransactionProductSignals,
+  suggestProductMatchRule,
+} from "~/lib/stripe-transaction-signals";
+import { STRIPE_PRODUCT_LOCKED_REASON } from "~/lib/stripe-product-bulk-assign";
+import { STRIPE_PRODUCT_MATCH_LABELS } from "~/lib/stripe-transactions-filters";
 import { getProductMatchRuleById, listProducts } from "~/lib/products.server";
 import { getQuickBooksRefundReceiptByQuickbooksId } from "~/lib/quickbooks-refund-receipts.server";
 import { getQuickBooksSalesReceiptByQuickbooksId } from "~/lib/quickbooks-sales-receipts.server";
@@ -28,7 +34,7 @@ import {
 } from "~/lib/wc-stripe-order-link.server";
 import {
   isStripeProductUnmatched,
-  primaryLotusProductIdFromWooCommerceOrder,
+  lotusProductIdForStripeFromWooCommerceOrder,
 } from "~/lib/wc-stripe-order-link";
 import { WooCommerceOrderLines } from "~/components/woocommerce-order-lines";
 import { getWooCommerceOrderById } from "~/lib/woocommerce-orders.server";
@@ -66,6 +72,15 @@ function MultilineText({ value }: { value: string | null | undefined }) {
     <span className="whitespace-pre-wrap break-words text-dark">{value}</span>
   );
 }
+
+const RULE_FIELD_OPTIONS = [
+  ["sku", "SKU"],
+  ["line_item_1", "Line item 1"],
+  ["line_items_summary", "Line items summary"],
+  ["charge_description", "Charge description"],
+  ["balance_description", "Balance description"],
+  ["any", "Any text"],
+] as const;
 
 function formatMatchedRuleLabel(rule: {
   priority: number;
@@ -127,23 +142,39 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     code: string;
     name: string;
   } | null = null;
+  let wcLotusProductAmbiguous = false;
 
   if (linkedWcOrder) {
     linkedWcOrderFull = await getWooCommerceOrderById(linkedWcOrder.id);
     if (linkedWcOrderFull) {
-      const productId = primaryLotusProductIdFromWooCommerceOrder(linkedWcOrderFull);
+      const productId = lotusProductIdForStripeFromWooCommerceOrder({
+        productId: linkedWcOrderFull.productId,
+        lineCatalogProductIds: linkedWcOrderFull.lotusProducts
+          .filter((product) => product.source === "line")
+          .map((product) => product.catalogProductId),
+      });
       if (productId) {
         const lotus = linkedWcOrderFull.lotusProducts.find(
-          (p) => p.catalogProductId === productId,
+          (product) => product.catalogProductId === productId,
         );
         wcLotusProductForCopy = {
           productId,
           code: lotus?.code ?? "—",
           name: lotus?.name ?? "Product",
         };
+      } else if (linkedWcOrderFull.lotusProducts.length > 1) {
+        wcLotusProductAmbiguous = true;
       }
     }
   }
+
+  const ruleSaved = url.searchParams.get("ruleSaved") === "1";
+  const ruleNotice = ruleSaved
+    ? {
+        created: url.searchParams.get("ruleCreated") !== "0",
+        mapped: Number(url.searchParams.get("ruleMapped") ?? "0") || 0,
+      }
+    : null;
 
   const stripeUnmatched = isStripeProductUnmatched(tx);
 
@@ -199,6 +230,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     linkedWcOrder,
     linkedWcOrderFull,
     wcLotusProductForCopy,
+    wcLotusProductAmbiguous,
+    ruleNotice,
     stripeUnmatched,
     canClearQuickBooksPush: isAdmin(user),
   };
@@ -221,11 +254,41 @@ export async function action({ request, params }: Route.ActionArgs) {
     if (!productId) {
       return { scope: "product" as const, error: "Select a product" };
     }
-    await setStripeTransactionProductManual(params.transactionId, productId, {
-      triggeredBy: "app",
-      userId: user.id,
-    });
+    const saved = await setStripeTransactionProductManual(
+      params.transactionId,
+      productId,
+      {
+        triggeredBy: "app",
+        userId: user.id,
+      },
+    );
+    if (!saved.ok) {
+      return { scope: "product" as const, error: saved.reason };
+    }
     return redirect(redirectUrl);
+  }
+
+  if (intent === "saveRule") {
+    const productId = String(form.get("productId") ?? "");
+    const field = String(form.get("field") ?? "");
+    const matchType = String(form.get("matchType") ?? "contains");
+    const pattern = String(form.get("pattern") ?? "");
+    const saved = await saveProductMatchRuleAndClassifyUnmatched({
+      productId,
+      field,
+      matchType,
+      pattern,
+      audit: { triggeredBy: "app", userId: user.id },
+    });
+    if (!saved.ok) {
+      return { scope: "rule" as const, error: saved.error };
+    }
+    const mapped = saved.result.matched + saved.result.fromWooCommerce;
+    const target = new URL(redirectUrl, "http://localhost");
+    target.searchParams.set("ruleSaved", "1");
+    target.searchParams.set("ruleCreated", saved.created ? "1" : "0");
+    target.searchParams.set("ruleMapped", String(mapped));
+    return redirect(`${target.pathname}${target.search}`);
   }
 
   if (intent === "copyProductFromWc") {
@@ -316,6 +379,8 @@ export default function StripeTransactionDetailPage({
     linkedWcOrder,
     linkedWcOrderFull,
     wcLotusProductForCopy,
+    wcLotusProductAmbiguous,
+    ruleNotice,
     stripeUnmatched,
     linkedQuickBooksSalesReceipt,
     linkedQuickBooksRefundReceipt,
@@ -323,6 +388,12 @@ export default function StripeTransactionDetailPage({
   } = loaderData;
   const location = useLocation();
   const postAction = location.pathname + location.search;
+  const suggestedRule = suggestProductMatchRule(productSignals);
+  const productStatusLabel = tx.productMatchStatus
+    ? (STRIPE_PRODUCT_MATCH_LABELS[
+        tx.productMatchStatus as keyof typeof STRIPE_PRODUCT_MATCH_LABELS
+      ] ?? tx.productMatchStatus)
+    : null;
 
   return (
     <AppPage
@@ -400,9 +471,15 @@ export default function StripeTransactionDetailPage({
                   variant="pill"
                   loadingLabel="Applying…"
                 >
-                  Use Lotus product from WC order ({wcLotusProductForCopy.code})
+                  Apply Lotus product from this order ({wcLotusProductForCopy.code})
                 </SubmitButton>
               </Form>
+            ) : stripeUnmatched && wcLotusProductAmbiguous ? (
+              <p className="text-xs text-ink-muted">
+                This order includes more than one Lotus product, so it is not
+                applied automatically. Assign one product on the order, or save
+                a match rule below.
+              </p>
             ) : stripeUnmatched && linkedWcOrder ? (
               <p className="text-xs text-ink-muted">
                 Linked order has no Lotus product to copy — assign one on the
@@ -432,10 +509,91 @@ export default function StripeTransactionDetailPage({
           {tx.productName
             ? `${tx.productCode} — ${tx.productName}`
             : "Not assigned"}
-          {tx.productMatchStatus && (
-            <span className="ml-2 capitalize">({tx.productMatchStatus})</span>
+          {productStatusLabel && (
+            <span className="ml-2">({productStatusLabel})</span>
           )}
         </p>
+        <Form method="post" action={postAction} className="mt-4 space-y-3">
+          <input type="hidden" name="returnTo" value={returnTo} />
+          <input type="hidden" name="matchType" value="contains" />
+          <div>
+            <h3 className="text-sm font-medium text-dark">Save a match rule</h3>
+            <p className="mt-1 text-xs text-ink-muted">
+              Maps this text to a Lotus product. Other unmatched Stripe
+              transactions with the same text are mapped now, and future syncs
+              use the rule. A linked WooCommerce order still wins. QuickBooks
+              uses the product&apos;s QuickBooks item. Manual assignments are
+              left as they are. A charge already in QuickBooks keeps the Lotus
+              product that was pushed.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-0.5 text-xs">
+              <span className="text-ink-muted">Lotus product</span>
+              <select
+                name="productId"
+                defaultValue={tx.productId ?? ""}
+                className="min-w-[12rem] rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
+              >
+                <option value="">— Select —</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.code} — {product.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-0.5 text-xs">
+              <span className="text-ink-muted">Field</span>
+              <select
+                name="field"
+                defaultValue={suggestedRule?.field ?? "line_item_1"}
+                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
+              >
+                {RULE_FIELD_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex min-w-[14rem] flex-1 flex-col gap-0.5 text-xs">
+              <span className="text-ink-muted">Text</span>
+              <input
+                name="pattern"
+                required
+                defaultValue={suggestedRule?.pattern ?? ""}
+                placeholder="Text that identifies this product"
+                className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
+              />
+            </label>
+            <SubmitButton
+              intent="saveRule"
+              variant="pill"
+              loadingLabel="Saving rule…"
+            >
+              Save rule and map unmatched
+            </SubmitButton>
+          </div>
+        </Form>
+        {ruleNotice && (
+          <p className="mt-2 text-sm text-jade" role="status">
+            {ruleNotice.created
+              ? "Saved the rule."
+              : "That rule was already saved."}{" "}
+            {ruleNotice.mapped === 0
+              ? "No unmatched transactions used that text."
+              : `Mapped ${ruleNotice.mapped} unmatched transaction${ruleNotice.mapped === 1 ? "" : "s"}.`}
+          </p>
+        )}
+        {actionData?.scope === "rule" && actionData.error && (
+          <p className="mt-2 text-sm text-maroon" role="alert">
+            {actionData.error}
+          </p>
+        )}
+        {tx.pushedToQuickbooks ? (
+          <p className="mt-3 text-xs text-ink-muted">{STRIPE_PRODUCT_LOCKED_REASON}</p>
+        ) : (
         <Form
           method="post"
           action={postAction}
@@ -443,16 +601,16 @@ export default function StripeTransactionDetailPage({
         >
           <input type="hidden" name="returnTo" value={returnTo} />
           <label className="flex flex-col gap-0.5 text-xs">
-            <span className="text-ink-muted">Assign product</span>
+            <span className="text-ink-muted">This transaction only</span>
             <select
               name="productId"
               defaultValue={tx.productId ?? ""}
-              className="rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm min-w-[12rem]"
+              className="min-w-[12rem] rounded-jamyang border border-sand-dark/60 bg-surface px-2 py-1.5 text-sm"
             >
               <option value="">— Select —</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.code} — {p.name}
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.code} — {product.name}
                 </option>
               ))}
             </select>
@@ -465,6 +623,12 @@ export default function StripeTransactionDetailPage({
             Save (manual)
           </SubmitButton>
         </Form>
+        )}
+        {tx.pushedToQuickbooks ? null : (
+        <p className="mt-1 text-xs text-ink-faint">
+          Manual assignment does not create a rule.
+        </p>
+        )}
         <Form method="post" action={postAction} className="mt-2">
           <input type="hidden" name="returnTo" value={returnTo} />
           <SubmitButton
@@ -475,14 +639,21 @@ export default function StripeTransactionDetailPage({
             Re-classify
           </SubmitButton>
         </Form>
+        <p className="mt-1 text-xs text-ink-faint">
+          Re-classify on this page replaces a manual assignment when a
+          WooCommerce order or a rule matches. A charge already in QuickBooks
+          keeps its Lotus product.
+        </p>
         {actionData?.scope === "product" && actionData.error && (
           <p className="mt-2 text-sm text-maroon">{actionData.error}</p>
         )}
         {actionData?.scope === "clearQbPush" && actionData.error && (
           <p className="mt-2 text-sm text-maroon">{actionData.error}</p>
         )}
-        <DetailRow label="Matched by rule">
-          {tx.productMatchStatus === "manual" ? (
+        <DetailRow label="Matched by">
+          {tx.productMatchStatus === "woocommerce" ? (
+            <span>WooCommerce order</span>
+          ) : tx.productMatchStatus === "manual" ? (
             <span className="text-ink-muted">Manual assignment (no rule)</span>
           ) : matchedRule ? (
             <span className="text-sm text-dark">

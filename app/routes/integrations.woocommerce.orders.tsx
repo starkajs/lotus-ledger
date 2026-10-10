@@ -15,6 +15,8 @@ import {
   wooCommerceOrdersHref,
   type WooCommerceOrderListFilters,
 } from "~/lib/woocommerce-orders-filters";
+import { classifyStripeTransactionsForWooCommerceLinks } from "~/lib/product-classification.server";
+import { formatNewlyMappedStripeTransactions } from "~/lib/stripe-product-bulk-assign";
 import { listProducts } from "~/lib/products.server";
 import {
   bulkSetWooCommerceOrderLotusProducts,
@@ -274,6 +276,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     productsLinked: url.searchParams.get("productsLinked"),
     ordersManual: url.searchParams.get("ordersManual"),
     bulkSkipped: url.searchParams.get("bulkSkipped"),
+    stripeMapped: url.searchParams.get("stripeMapped"),
   };
 }
 
@@ -303,6 +306,11 @@ export async function action({ request }: Route.ActionArgs) {
         orderIds,
         productId,
       );
+      const stripe = await classifyStripeTransactionsForWooCommerceLinks({
+        wcProductIds: result.linkedWcProductIds,
+        woocommerceOrderIds: orderIds,
+        audit: { triggeredBy: "app", userId: user.id },
+      });
       const params = new URLSearchParams(url.searchParams);
       params.delete("bulkAssigned");
       params.delete("bulkSkipped");
@@ -311,6 +319,7 @@ export async function action({ request }: Route.ActionArgs) {
       if (result.skipped > 0) {
         params.set("bulkSkipped", String(result.skipped));
       }
+      params.set("stripeMapped", String(stripe.newlyMapped));
       const query = params.toString();
       return redirect(query ? `${url.pathname}?${query}` : url.pathname);
     } catch (err) {
@@ -369,6 +378,7 @@ export default function WooCommerceOrdersPage({
     productsLinked,
     ordersManual,
     bulkSkipped,
+    stripeMapped,
   } = loaderData;
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const selectAllRef = useRef<HTMLInputElement>(null);
@@ -523,6 +533,9 @@ export default function WooCommerceOrdersPage({
                 : ""}
               {bulkSkipped && bulkSkipped !== "0"
                 ? ` ${bulkSkipped} skipped because they were already mapped.`
+                : ""}
+              {stripeMapped != null
+                ? ` ${formatNewlyMappedStripeTransactions(Number(stripeMapped) || 0)}`
                 : ""}
             </p>
           )}

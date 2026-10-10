@@ -42,9 +42,11 @@ try {
   console.log("\nDone.");
   console.log(`  Processed:       ${result.processed}`);
   console.log(`  Matched:         ${result.matched}`);
+  console.log(`  WooCommerce:     ${result.fromWooCommerce}`);
   console.log(`  Unmatched:       ${result.unmatched}`);
   console.log(`  Ambiguous:       ${result.ambiguous}`);
   console.log(`  Skipped manual:  ${result.skippedManual}`);
+  console.log(`  Kept (in QuickBooks): ${result.skippedPushed}`);
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);

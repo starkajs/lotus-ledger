@@ -5,7 +5,12 @@ import {
 } from "~/db/schema";
 import type { WooCommerceOrder } from "~/lib/woocommerce-api.server";
 
-type StripeProductMatchStatus = "matched" | "unmatched" | "manual" | "ambiguous";
+type StripeProductMatchStatus =
+  | "matched"
+  | "unmatched"
+  | "manual"
+  | "ambiguous"
+  | "woocommerce";
 
 /** Stripe txn matches a WC order by `order_key` and/or WC `order_id` in metadata. */
 export function stripeTransactionMatchesWooCommerceOrder(): SQL {
@@ -72,6 +77,25 @@ export function primaryLotusProductIdFromWooCommerceOrder(input: {
 }): string | null {
   if (input.productId) return input.productId;
   return input.lotusProducts[0]?.catalogProductId ?? null;
+}
+
+/**
+ * Lotus product a Stripe charge should inherit from its WooCommerce order.
+ * An explicit assignment on the order wins. Otherwise every mapped line must
+ * agree on the same catalog product.
+ */
+export function lotusProductIdForStripeFromWooCommerceOrder(input: {
+  productId: string | null;
+  lineCatalogProductIds: Array<string | null | undefined>;
+}): string | null {
+  if (input.productId) return input.productId;
+  const ids = [
+    ...new Set(
+      input.lineCatalogProductIds.filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (ids.length === 1) return ids[0]!;
+  return null;
 }
 
 export type LinkedStripeTransactionSummary = {

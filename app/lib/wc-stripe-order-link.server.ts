@@ -5,7 +5,9 @@ import {
   stripeBalanceTransactions,
   woocommerceOrders,
 } from "~/db/schema";
-import { setStripeTransactionProductManual } from "~/lib/product-classification.server";
+import { classifyStripeTransactionById } from "~/lib/product-classification.server";
+import { STRIPE_PRODUCT_LOCKED_REASON } from "~/lib/stripe-product-bulk-assign";
+import { getProductById } from "~/lib/products.server";
 import type { IntegrationAuditContext } from "~/lib/integration-jobs.server";
 import {
   extractOrderKeyFromStripeRaw,
@@ -14,13 +16,11 @@ import {
 import {
   extractOrderKeyFromWooCommerceOrder,
   normalizeOrderKey,
-  primaryLotusProductIdFromWooCommerceOrder,
   stripeTransactionMatchesWooCommerceOrder,
   type LinkedStripeTransactionSummary,
 } from "~/lib/wc-stripe-order-link";
 
 export type { LinkedStripeTransactionSummary } from "~/lib/wc-stripe-order-link";
-import { getWooCommerceOrderById } from "~/lib/woocommerce-orders.server";
 
 export type LinkedWooCommerceOrderSummary = {
   id: string;
@@ -313,27 +313,39 @@ export async function setStripeTransactionProductFromWooCommerceOrder(
   | { ok: true; productId: string; productCode: string; productName: string }
   | { ok: false; reason: string }
 > {
-  const order = await getWooCommerceOrderById(wooCommerceOrderId);
-  if (!order) {
-    return { ok: false, reason: "WooCommerce order not found" };
-  }
-
-  const productId = primaryLotusProductIdFromWooCommerceOrder(order);
-  if (!productId) {
+  const linked = await findLinkedWooCommerceOrderForStripeTransaction(transactionId);
+  if (!linked || linked.id !== wooCommerceOrderId) {
     return {
       ok: false,
-      reason: "Linked WooCommerce order has no Lotus product assigned",
+      reason: "That WooCommerce order is not linked to this Stripe transaction",
     };
   }
 
-  const lotus = order.lotusProducts.find((p) => p.catalogProductId === productId);
-  await setStripeTransactionProductManual(transactionId, productId, audit);
+  const classified = await classifyStripeTransactionById(transactionId, {
+    wooCommerceOnly: true,
+    audit: {
+      triggeredBy: audit?.triggeredBy ?? "app",
+      userId: audit?.userId,
+      action: "classify",
+    },
+  });
+  if (!classified || classified.status !== "woocommerce" || !classified.productId) {
+    return {
+      ok: false,
+      reason: classified?.skippedPushed
+        ? STRIPE_PRODUCT_LOCKED_REASON
+        : classified?.skippedManual
+          ? "This transaction has a manual product assignment. Re-classify to replace it."
+          : "This WooCommerce order does not map to one Lotus product",
+    };
+  }
 
+  const product = await getProductById(classified.productId);
   return {
     ok: true,
-    productId,
-    productCode: lotus?.code ?? "—",
-    productName: lotus?.name ?? "Product",
+    productId: classified.productId,
+    productCode: product?.code ?? "—",
+    productName: product?.name ?? "Product",
   };
 }
 

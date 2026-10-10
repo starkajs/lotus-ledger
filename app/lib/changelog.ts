@@ -21,6 +21,18 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-10-stripe-product-rules",
+    shipped: "2026-10-10",
+    title: "Stripe products from orders and rules",
+    changes: [
+      "A Stripe charge linked to a WooCommerce order takes that order's Lotus product, and therefore its QuickBooks item.",
+      "Saving a match rule from a Stripe transaction maps other unmatched charges with the same text. Future syncs use the rule.",
+      "A Stripe charge already pushed to QuickBooks keeps its Lotus product.",
+    ],
+    commit: "",
+    parent: "abf5e92f222d4646315956763d4f244235da0434",
+  },
+  {
     id: "2026-10-10-wc-stripe-other-period",
     shipped: "2026-10-10",
     title: "Stripe and WooCommerce in another period",

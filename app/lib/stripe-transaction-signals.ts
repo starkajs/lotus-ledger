@@ -458,3 +458,43 @@ export function extractStripeTransactionProductSignals(input: {
     sku,
   };
 }
+
+export type SuggestedProductMatchRule = {
+  field:
+    | "sku"
+    | "line_item_1"
+    | "line_items_summary"
+    | "charge_description"
+    | "balance_description";
+  matchType: "contains";
+  pattern: string;
+};
+
+const MAX_SUGGESTED_PATTERN_LENGTH = 180;
+
+/** Best plain-text pattern to turn this charge into a reusable product rule. */
+export function suggestProductMatchRule(
+  signals: StripeTransactionProductSignals,
+): SuggestedProductMatchRule | null {
+  const candidates: Array<{
+    field: SuggestedProductMatchRule["field"];
+    value: string | null;
+  }> = [
+    { field: "sku", value: signals.sku },
+    { field: "line_item_1", value: signals.lineItem1 },
+    { field: "line_items_summary", value: signals.lineItemsSummary },
+    { field: "charge_description", value: signals.chargeDescription },
+    {
+      field: "balance_description",
+      value: signals.balanceDescription ?? signals.description,
+    },
+  ];
+
+  for (const candidate of candidates) {
+    const pattern = candidate.value?.trim() ?? "";
+    if (!pattern || pattern.length > MAX_SUGGESTED_PATTERN_LENGTH) continue;
+    return { field: candidate.field, matchType: "contains", pattern };
+  }
+
+  return null;
+}

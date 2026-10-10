@@ -10,10 +10,13 @@ Each synced Stripe balance transaction maps to one **Lotus product**, which maps
 
 ## Rules
 
-1. **First match wins** — rules grouped by `priority`; first priority level with exactly one match assigns the product.
-2. **Ambiguous** — two or more rules match at the same priority → no product assigned.
-3. **Manual is sticky** — `product_match_status = manual` is not overwritten by sync or Re-classify (unmatched only). Use **Re-classify** on the transaction detail page with force to overwrite manual.
-4. **QuickBooks push** requires `product_id` and `products.quickbooks_item_id`.
+1. **WooCommerce order first** — a linked order with one Lotus product (an assignment on the order, or every mapped line agreeing) sets `product_match_status = woocommerce`. That product is what QuickBooks receives. Several different Lotus products on the order are left for a rule or a manual assignment.
+2. **First match wins** — rules grouped by `priority`; first priority level with exactly one match assigns the product.
+3. **Ambiguous** — two or more rules match at the same priority → no product assigned.
+4. **Manual is sticky** — `product_match_status = manual` is not overwritten by sync or list Re-classify. **Re-classify** on the transaction detail page forces a new match. Saving a rule from a transaction does not change manual rows.
+5. **Saving a rule maps unmatched rows** — the transaction detail page can save the charge text as a rule (priority 50) and immediately classify unmatched transactions. Sync classifies new charges.
+6. **Already in QuickBooks** — once `pushed_to_quickbooks` is true, sync, Re-classify, rules, WooCommerce order mapping, and manual assignment do not change `product_id`. The QuickBooks receipt stays aligned with Lotus Ledger.
+7. **QuickBooks push** requires `product_id` and `products.quickbooks_item_id`.
 
 ## Classification text sources
 
@@ -38,4 +41,4 @@ npm run classify:stripe-transactions -- --force
 - `/products` — manage catalog and QuickBooks item IDs
 - `/products/rules` — match rules + sample text tester
 - Stripe transactions list — Product column and filters
-- Transaction detail — manual assign, Re-classify, QB readiness
+- Transaction detail — save a match rule, manual assign, apply the WooCommerce order product, Re-classify, QB readiness

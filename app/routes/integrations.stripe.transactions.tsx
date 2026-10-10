@@ -48,6 +48,9 @@ function ProductCell({ tx }: { tx: StripeBalanceTransactionRecord }) {
         {tx.productMatchStatus === "manual" && (
           <span className="ml-1 text-[10px] text-ink-faint">manual</span>
         )}
+        {tx.productMatchStatus === "woocommerce" && (
+          <span className="ml-1 text-[10px] text-ink-faint">order</span>
+        )}
       </span>
     );
   }
@@ -485,7 +488,7 @@ export default function StripeTransactionsPage({
   return (
     <AppPage
       title="Stripe transactions"
-      description="Balance transactions synced from each connected Stripe account."
+      description="Balance transactions synced from each connected Stripe account. A linked WooCommerce order supplies the Lotus product. Otherwise product match rules apply, and a rule saved from a transaction maps the other unmatched charges and future syncs."
       contentClassName="min-w-0"
       actions={
         connections.length > 0 ? (
@@ -623,11 +626,17 @@ export default function StripeTransactionsPage({
           <p className="font-medium text-dark">Classification complete</p>
           <ul className="mt-2 list-inside list-disc text-ink-muted">
             <li>{classifyResult.processed} processed</li>
-            <li>{classifyResult.matched} matched</li>
+            <li>{classifyResult.matched} matched by rule</li>
+            <li>{classifyResult.fromWooCommerce} from WooCommerce orders</li>
             <li>{classifyResult.unmatched} unmatched</li>
             <li>{classifyResult.ambiguous} ambiguous</li>
             {classifyResult.skippedManual > 0 && (
               <li>{classifyResult.skippedManual} skipped (manual)</li>
+            )}
+            {classifyResult.skippedPushed > 0 && (
+              <li>
+                {classifyResult.skippedPushed} kept (already in QuickBooks)
+              </li>
             )}
           </ul>
         </div>
@@ -659,7 +668,7 @@ export default function StripeTransactionsPage({
             const skipped = bulkSkipped ? Number(bulkSkipped) : 0;
             const skippedNote =
               skipped > 0
-                ? ` ${skipped} skipped (already matched or manual).`
+                ? ` ${skipped} skipped (already matched, manual, or in QuickBooks).`
                 : "";
             return `Assigned Lotus product to ${count} ${label}.${skippedNote}`;
           })()}

@@ -4,6 +4,8 @@ import type { Route } from "./+types/integrations.woocommerce.orders.$orderId";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
 import { getWooCommerceSiteUrl } from "~/lib/env.server";
+import { classifyStripeTransactionsForWooCommerceLinks } from "~/lib/product-classification.server";
+import { formatNewlyMappedStripeTransactions } from "~/lib/stripe-product-bulk-assign";
 import { listProducts } from "~/lib/products.server";
 import { requireUser } from "~/lib/session.server";
 import { formatWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
@@ -114,6 +116,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     lineLookups,
     wpAdminOrderUrl,
     linkedStripeTransactions,
+    stripeMapped: url.searchParams.get("stripeMapped"),
   };
 }
 
@@ -156,7 +159,7 @@ function LineLotusProductCell({ lookup }: { lookup: OrderLineSkuLookup }) {
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
   const returnTo = String(
@@ -164,12 +167,16 @@ export async function action({ request, params }: Route.ActionArgs) {
   );
 
   const detailPath = `/integrations/woocommerce/orders/${params.orderId}`;
-  const redirectUrl = `${detailPath}?returnTo=${encodeURIComponent(returnTo)}`;
 
   if (intent === "setLotusProduct") {
     const productId = String(form.get("productId") ?? "").trim() || null;
     try {
       await setWooCommerceOrderLotusProduct(params.orderId, productId);
+      const stripe = await classifyStripeTransactionsForWooCommerceLinks({
+        woocommerceOrderIds: [params.orderId],
+        audit: { triggeredBy: "app", userId: user.id },
+      });
+      const redirectUrl = `${detailPath}?returnTo=${encodeURIComponent(returnTo)}&stripeMapped=${stripe.newlyMapped}`;
       return redirect(redirectUrl);
     } catch (err) {
       return {
@@ -195,6 +202,7 @@ export default function WooCommerceOrderDetailPage({
     lineLookups,
     wpAdminOrderUrl,
     linkedStripeTransactions,
+    stripeMapped,
   } = loaderData;
   const lineLookupById = new Map(
     lineLookups.map((lookup) => [lookup.lineId, lookup]),
@@ -224,7 +232,13 @@ export default function WooCommerceOrderDetailPage({
           Assign a catalog product for this order when WC line items cannot be
           mapped (e.g. deleted shop products). Line-item mappings from WC
           products are shown below and are combined with any manual assignment.
+          Stripe charges for this order use that Lotus product.
         </p>
+        {stripeMapped != null && (
+          <p className="mt-2 text-sm text-jade" role="status">
+            {formatNewlyMappedStripeTransactions(Number(stripeMapped) || 0)}
+          </p>
+        )}
         {manualLotus ? (
           <p className="mt-2 text-sm text-dark">
             <span className="text-ink-muted">Manual: </span>

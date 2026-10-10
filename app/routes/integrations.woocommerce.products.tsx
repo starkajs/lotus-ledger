@@ -3,6 +3,8 @@ import type { Route } from "./+types/integrations.woocommerce.products";
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
 import { WooCommerceProductsTable } from "~/components/woocommerce-products-table";
+import { classifyStripeTransactionsForWooCommerceLinks } from "~/lib/product-classification.server";
+import { formatNewlyMappedStripeTransactions } from "~/lib/stripe-product-bulk-assign";
 import { listProducts } from "~/lib/products.server";
 import { requireUser } from "~/lib/session.server";
 import {
@@ -74,6 +76,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     statuses.includes(statusRaw) || statusRaw === "all" ? statusRaw : "all";
 
   const bulkAssigned = url.searchParams.get("bulkAssigned");
+  const stripeMapped = url.searchParams.get("stripeMapped");
 
   return {
     ...list,
@@ -83,6 +86,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     lotusLink,
     catalogProducts,
     bulkAssigned,
+    stripeMapped,
   };
 }
 
@@ -116,11 +120,16 @@ export async function action({ request }: Route.ActionArgs) {
         wcProductIds,
         productId,
       );
+      const stripe = await classifyStripeTransactionsForWooCommerceLinks({
+        woocommerceProductRowIds: wcProductIds,
+        audit: { triggeredBy: "app", userId: user.id },
+      });
       const params = new URLSearchParams(url.searchParams);
       params.set(
         "bulkAssigned",
         productId ? String(result.updated) : `cleared-${result.updated}`,
       );
+      params.set("stripeMapped", String(stripe.newlyMapped));
       const query = params.toString();
       return redirect(query ? `${url.pathname}?${query}` : url.pathname);
     } catch (err) {
@@ -155,6 +164,7 @@ export default function WooCommerceProductsPage({
     lotusLink,
     catalogProducts,
     bulkAssigned,
+    stripeMapped,
   } = loaderData;
 
   const syncResult =
@@ -229,9 +239,13 @@ export default function WooCommerceProductsPage({
                   cleared ? bulkAssigned.slice("cleared-".length) : bulkAssigned,
                 );
                 const label = count === 1 ? "product" : "products";
+                const stripeNote =
+                  stripeMapped != null
+                    ? ` ${formatNewlyMappedStripeTransactions(Number(stripeMapped) || 0)}`
+                    : "";
                 return cleared
-                  ? `Cleared Lotus link on ${count} ${label}.`
-                  : `Assigned Lotus product to ${count} ${label}.`;
+                  ? `Cleared Lotus link on ${count} ${label}.${stripeNote}`
+                  : `Assigned Lotus product to ${count} ${label}.${stripeNote}`;
               })()}
             </p>
           )}

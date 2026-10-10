@@ -6,10 +6,22 @@ import type { QuickbooksPushFilter } from "~/lib/stripe-quickbooks.constants";
 
 export const STRIPE_PRODUCT_MATCH_STATUSES = [
   "matched",
+  "woocommerce",
   "unmatched",
   "manual",
   "ambiguous",
 ] as const;
+
+export const STRIPE_PRODUCT_MATCH_LABELS: Record<
+  StripeProductMatchFilter,
+  string
+> = {
+  matched: "Matched by rule",
+  woocommerce: "WooCommerce order",
+  unmatched: "Unmatched",
+  manual: "Manual",
+  ambiguous: "Ambiguous",
+};
 
 export type StripeProductMatchFilter =
   (typeof STRIPE_PRODUCT_MATCH_STATUSES)[number];

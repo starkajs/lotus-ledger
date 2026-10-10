@@ -6,7 +6,18 @@ import {
   stripeBalanceTransactions,
 } from "~/db/schema";
 import type { StripeBalanceTransactionRecord } from "./stripe-balance-transactions.server";
-import { getProductById } from "./products.server";
+import {
+  createProductMatchRule,
+  getProductById,
+  listProductMatchRules,
+} from "./products.server";
+import {
+  listStripeTransactionIdsForWooCommerceLinks,
+  loadWooCommerceLotusProductIndex,
+  lotusProductIdForStripeLink,
+  lotusProductIdFromIndex,
+  type WooCommerceLotusProductIndex,
+} from "./stripe-woocommerce-product.server";
 import {
   type ClassificationAuditContext,
   recordClassificationEvent,
@@ -15,6 +26,8 @@ import {
 } from "./integration-jobs.server";
 import {
   collectClassificationText,
+  extractOrderKeyFromStripeRaw,
+  extractWcOrderIdFromStripeRaw,
   type ClassificationText,
 } from "./stripe-transaction-signals";
 
@@ -30,8 +43,28 @@ export type ProductMatchStatus =
 export {
   canBulkAssignStripeTransactionProduct,
 } from "./stripe-product-bulk-assign";
-import { canBulkAssignStripeTransactionProduct } from "./stripe-product-bulk-assign";
-import { testProductRuleRegex } from "./product-rule-pattern";
+import {
+  canBulkAssignStripeTransactionProduct,
+  STRIPE_PRODUCT_LOCKED_REASON,
+  stripeProductLockedByQuickBooksPush,
+} from "./stripe-product-bulk-assign";
+import {
+  productRulePatternError,
+  testProductRuleRegex,
+} from "./product-rule-pattern";
+
+const PRODUCT_RULE_FIELDS = new Set([
+  "any",
+  "sku",
+  "balance_description",
+  "charge_description",
+  "line_item_1",
+  "line_items_summary",
+  "donorbox_metadata",
+  "metadata_all",
+]);
+
+const PRODUCT_RULE_MATCH_TYPES = new Set(["contains", "regex", "sku"]);
 
 export type ProductMatchRuleRecord = {
   id: string;
@@ -51,6 +84,8 @@ export type ClassifyTransactionResult = {
   productId: string | null;
   productMatchRuleId: string | null;
   skippedManual?: boolean;
+  skippedPushed?: boolean;
+  changed?: boolean;
 };
 
 function textsForField(
@@ -152,6 +187,10 @@ export async function classifyStripeTransactionById(
   options: {
     force?: boolean;
     audit?: ClassificationAuditContext;
+    rules?: ProductMatchRuleRecord[];
+    wcProducts?: WooCommerceLotusProductIndex;
+    /** When set, only a WooCommerce order product is written. Rules are left alone. */
+    wooCommerceOnly?: boolean;
   } = {},
 ): Promise<ClassifyTransactionResult | null> {
   const db = getDb();
@@ -175,16 +214,63 @@ export async function classifyStripeTransactionById(
       productId: row.productId,
       productMatchRuleId: row.productMatchRuleId,
       skippedManual: true,
+      changed: false,
     };
   }
 
-  const texts = collectClassificationText({
-    description: row.description,
-    stripeRaw: row.stripeRaw,
-    sku: row.sku,
-  });
-  const rules = await listActiveProductMatchRules();
-  const result = evaluateProductMatch(texts, rules);
+  const link = {
+    orderKey:
+      row.orderKey ?? extractOrderKeyFromStripeRaw(row.stripeRaw ?? null),
+    wcOrderId:
+      row.wcOrderId ?? extractWcOrderIdFromStripeRaw(row.stripeRaw ?? null),
+  };
+  const wooCommerceProductId = options.wcProducts
+    ? lotusProductIdFromIndex(options.wcProducts, link)
+    : await lotusProductIdForStripeLink(link);
+
+  let result: ClassifyTransactionResult;
+  if (!wooCommerceProductId && options.wooCommerceOnly) {
+    return {
+      status: (row.productMatchStatus as ProductMatchStatus | null) ?? "unmatched",
+      productId: row.productId,
+      productMatchRuleId: row.productMatchRuleId,
+      changed: false,
+    };
+  }
+  if (wooCommerceProductId) {
+    result = {
+      status: "woocommerce",
+      productId: wooCommerceProductId,
+      productMatchRuleId: null,
+    };
+  } else {
+    const texts = collectClassificationText({
+      description: row.description,
+      stripeRaw: row.stripeRaw,
+      sku: row.sku,
+    });
+    const rules = options.rules ?? (await listActiveProductMatchRules());
+    result = evaluateProductMatch(texts, rules);
+  }
+
+  if (
+    stripeProductLockedByQuickBooksPush(row.pushedToQuickbooks) &&
+    result.productId !== row.productId
+  ) {
+    return {
+      status: (row.productMatchStatus as ProductMatchStatus | null) ?? "unmatched",
+      productId: row.productId,
+      productMatchRuleId: row.productMatchRuleId,
+      changed: false,
+      skippedPushed: true,
+    };
+  }
+
+  result.changed =
+    before.productId !== result.productId ||
+    before.productMatchRuleId !== result.productMatchRuleId ||
+    before.productMatchStatus !== result.status;
+
   const now = new Date();
 
   await db
@@ -226,7 +312,9 @@ export type ClassifyAllResult = {
   matched: number;
   unmatched: number;
   ambiguous: number;
+  fromWooCommerce: number;
   skippedManual: number;
+  skippedPushed: number;
 };
 
 async function classifyAllStripeTransactionsInner(
@@ -240,7 +328,9 @@ async function classifyAllStripeTransactionsInner(
     matched: 0,
     unmatched: 0,
     ambiguous: 0,
+    fromWooCommerce: 0,
     skippedManual: 0,
+    skippedPushed: 0,
   };
 
   const conditions = [];
@@ -268,6 +358,7 @@ async function classifyAllStripeTransactionsInner(
           "matched",
           "unmatched",
           "ambiguous",
+          "woocommerce",
         ]),
       ),
     );
@@ -285,9 +376,16 @@ async function classifyAllStripeTransactionsInner(
     .from(stripeBalanceTransactions)
     .where(where);
 
+  const [rules, wcProducts] = await Promise.all([
+    listActiveProductMatchRules(),
+    loadWooCommerceLotusProductIndex(),
+  ]);
+
   for (const { id } of rows) {
     const classified = await classifyStripeTransactionById(id, {
       force: options.force,
+      rules,
+      wcProducts,
       audit: {
         triggeredBy: audit.triggeredBy,
         userId: audit.userId,
@@ -296,14 +394,7 @@ async function classifyAllStripeTransactionsInner(
       },
     });
     if (!classified) continue;
-    result.processed += 1;
-    if (classified.skippedManual) {
-      result.skippedManual += 1;
-      continue;
-    }
-    if (classified.status === "matched") result.matched += 1;
-    else if (classified.status === "ambiguous") result.ambiguous += 1;
-    else if (classified.status === "unmatched") result.unmatched += 1;
+    tallyClassification(result, classified);
   }
 
   return result;
@@ -331,11 +422,152 @@ export async function classifyAllStripeTransactions(
   );
 }
 
+function tallyClassification(
+  result: ClassifyAllResult,
+  classified: ClassifyTransactionResult,
+) {
+  result.processed += 1;
+  if (classified.skippedManual) {
+    result.skippedManual += 1;
+    return;
+  }
+  if (classified.skippedPushed) {
+    result.skippedPushed += 1;
+    return;
+  }
+  if (classified.status === "woocommerce") result.fromWooCommerce += 1;
+  else if (classified.status === "matched") result.matched += 1;
+  else if (classified.status === "ambiguous") result.ambiguous += 1;
+  else if (classified.status === "unmatched") result.unmatched += 1;
+}
+
+export type WooCommerceStripeClassifyResult = {
+  considered: number;
+  newlyMapped: number;
+};
+
+/** Re-apply order and rule mapping to Stripe charges touched by a WooCommerce link. */
+export async function classifyStripeTransactionsForWooCommerceLinks(input: {
+  wcProductIds?: number[];
+  woocommerceProductRowIds?: string[];
+  woocommerceOrderIds?: string[];
+  audit?: IntegrationAuditContext;
+}): Promise<WooCommerceStripeClassifyResult> {
+  const ids = await listStripeTransactionIdsForWooCommerceLinks(input);
+  const summary: WooCommerceStripeClassifyResult = {
+    considered: ids.length,
+    newlyMapped: 0,
+  };
+  if (ids.length === 0) return summary;
+
+  const audit = input.audit ?? { triggeredBy: "cli" as const };
+  const [rules, wcProducts] = await Promise.all([
+    listActiveProductMatchRules(),
+    loadWooCommerceLotusProductIndex(),
+  ]);
+
+  for (const id of ids) {
+    const classified = await classifyStripeTransactionById(id, {
+      rules,
+      wcProducts,
+      audit: {
+        triggeredBy: audit.triggeredBy,
+        userId: audit.userId,
+        action: "classify",
+      },
+    });
+    if (
+      classified?.changed &&
+      classified.productId &&
+      (classified.status === "woocommerce" || classified.status === "matched")
+    ) {
+      summary.newlyMapped += 1;
+    }
+  }
+
+  return summary;
+}
+
+const RULE_PRIORITY_FROM_TRANSACTION = 50;
+
+export async function saveProductMatchRuleAndClassifyUnmatched(input: {
+  productId: string;
+  field: string;
+  matchType: string;
+  pattern: string;
+  audit?: IntegrationAuditContext;
+}): Promise<
+  | {
+      ok: true;
+      ruleId: string;
+      created: boolean;
+      result: ClassifyAllResult;
+    }
+  | { ok: false; error: string }
+> {
+  const productId = input.productId.trim();
+  const field = input.field.trim();
+  const matchType = input.matchType.trim();
+  const pattern = input.pattern.trim();
+
+  if (!productId) return { ok: false, error: "Select a product" };
+  if (!PRODUCT_RULE_FIELDS.has(field)) {
+    return { ok: false, error: "Choose a field to match" };
+  }
+  if (!PRODUCT_RULE_MATCH_TYPES.has(matchType)) {
+    return { ok: false, error: "Choose a match type" };
+  }
+  if (!pattern) return { ok: false, error: "Enter the text to match" };
+
+  const patternError = productRulePatternError(matchType, pattern);
+  if (patternError) return { ok: false, error: patternError };
+
+  const product = await getProductById(productId);
+  if (!product) return { ok: false, error: "Product not found" };
+
+  const needle = pattern.toLowerCase();
+  const samePattern = (await listProductMatchRules()).filter(
+    (rule) =>
+      rule.isActive &&
+      rule.field === field &&
+      rule.matchType === matchType &&
+      rule.pattern.toLowerCase() === needle,
+  );
+  const otherProduct = samePattern.find((rule) => rule.productId !== productId);
+  if (otherProduct) {
+    return {
+      ok: false,
+      error: `An active rule already maps this text to ${otherProduct.productCode} — ${otherProduct.productName}.`,
+    };
+  }
+
+  const existing = samePattern.find((rule) => rule.productId === productId);
+  const created = !existing;
+  const ruleId = existing
+    ? existing.id
+    : await createProductMatchRule({
+        productId,
+        priority: RULE_PRIORITY_FROM_TRANSACTION,
+        field,
+        matchType,
+        pattern,
+        caseInsensitive: true,
+      });
+
+  const audit = input.audit ?? { triggeredBy: "cli" as const };
+  const result = await classifyAllStripeTransactions({
+    onlyUnmatched: true,
+    audit,
+  });
+
+  return { ok: true, ruleId, created, result };
+}
+
 export async function setStripeTransactionProductManual(
   transactionId: string,
   productId: string,
   audit?: IntegrationAuditContext,
-): Promise<void> {
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   const db = getDb();
   const [row] = await db
     .select()
@@ -343,7 +575,17 @@ export async function setStripeTransactionProductManual(
     .where(eq(stripeBalanceTransactions.id, transactionId))
     .limit(1);
 
-  if (!row) return;
+  if (!row) return { ok: false, reason: "Transaction not found" };
+
+  if (
+    stripeProductLockedByQuickBooksPush(row.pushedToQuickbooks) &&
+    row.productId !== productId
+  ) {
+    return { ok: false, reason: STRIPE_PRODUCT_LOCKED_REASON };
+  }
+  if (row.productId === productId && row.productMatchStatus === "manual") {
+    return { ok: true };
+  }
 
   const before = {
     productId: row.productId,
@@ -378,6 +620,7 @@ export async function setStripeTransactionProductManual(
       action: "manual_set",
     },
   });
+  return { ok: true };
 }
 
 export type BulkSetStripeTransactionsProductManualResult = {
@@ -385,6 +628,7 @@ export type BulkSetStripeTransactionsProductManualResult = {
   skipped: number;
   skippedManual: number;
   skippedMatched: number;
+  skippedPushed: number;
   notFound: number;
 };
 
@@ -404,6 +648,7 @@ export async function bulkSetStripeTransactionsProductManual(
     skipped: 0,
     skippedManual: 0,
     skippedMatched: 0,
+    skippedPushed: 0,
     notFound: 0,
   };
 
@@ -415,6 +660,7 @@ export async function bulkSetStripeTransactionsProductManual(
       id: stripeBalanceTransactions.id,
       productId: stripeBalanceTransactions.productId,
       productMatchStatus: stripeBalanceTransactions.productMatchStatus,
+      pushedToQuickbooks: stripeBalanceTransactions.pushedToQuickbooks,
     })
     .from(stripeBalanceTransactions)
     .where(inArray(stripeBalanceTransactions.id, uniqueIds));
@@ -437,15 +683,30 @@ export async function bulkSetStripeTransactionsProductManual(
       result.skipped += 1;
       continue;
     }
-    if (!canBulkAssignStripeTransactionProduct({
-      productId: row.productId,
-      productMatchStatus: row.productMatchStatus as ProductMatchStatus | null,
-    })) {
+    if (
+      !canBulkAssignStripeTransactionProduct({
+        productId: row.productId,
+        productMatchStatus: row.productMatchStatus as ProductMatchStatus | null,
+        pushedToQuickbooks: row.pushedToQuickbooks,
+      })
+    ) {
+      if (stripeProductLockedByQuickBooksPush(row.pushedToQuickbooks)) {
+        result.skippedPushed += 1;
+      }
       result.skipped += 1;
       continue;
     }
 
-    await setStripeTransactionProductManual(transactionId, productId, audit);
+    const saved = await setStripeTransactionProductManual(
+      transactionId,
+      productId,
+      audit,
+    );
+    if (!saved.ok) {
+      result.skippedPushed += 1;
+      result.skipped += 1;
+      continue;
+    }
     result.updated += 1;
   }
 

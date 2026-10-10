@@ -125,7 +125,7 @@ export default function ProductRulesPage({
   return (
     <AppPage
       title="Product match rules"
-      description="Lower priority runs first. First matching rule at a priority level wins; two matches at the same priority is ambiguous."
+      description="Lower priority runs first. First matching rule at a priority level wins; two matches at the same priority is ambiguous. A rule saved from a Stripe transaction also maps unmatched charges immediately. A linked WooCommerce order still supplies the Lotus product first."
       actions={
         <Link
           to="/products"

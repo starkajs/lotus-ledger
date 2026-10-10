@@ -855,13 +855,23 @@ async function attachOrderLineContext(
 export async function bulkSetWooCommerceOrderLotusProducts(
   orderIds: string[],
   productId: string,
-): Promise<{ productsLinked: number; ordersManual: number; skipped: number }> {
+): Promise<{
+  productsLinked: number;
+  ordersManual: number;
+  skipped: number;
+  linkedWcProductIds: number[];
+}> {
   const ids = [...new Set(orderIds.map((id) => id.trim()).filter(Boolean))].slice(
     0,
     100,
   );
   if (ids.length === 0) {
-    return { productsLinked: 0, ordersManual: 0, skipped: 0 };
+    return {
+      productsLinked: 0,
+      ordersManual: 0,
+      skipped: 0,
+      linkedWcProductIds: [],
+    };
   }
 
   const db = getDb();
@@ -948,6 +958,7 @@ export async function bulkSetWooCommerceOrderLotusProducts(
     productsLinked: linked.length,
     ordersManual: manual.length,
     skipped: ids.length - covered.size,
+    linkedWcProductIds: linked.map((row) => row.wcProductId),
   };
 }
 

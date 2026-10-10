@@ -4,6 +4,7 @@ import {
   type DatePeriodPreset,
 } from "~/lib/date-range-filters";
 import {
+  STRIPE_PRODUCT_MATCH_LABELS,
   STRIPE_PRODUCT_MATCH_STATUSES,
   type StripeProductMatchFilter,
 } from "~/lib/stripe-transactions-filters";
@@ -109,7 +110,7 @@ export function StripeTransactionsFilterForm({
             <option value="all">All</option>
             {STRIPE_PRODUCT_MATCH_STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status.charAt(0).toUpperCase() + status.slice(1)}
+                {STRIPE_PRODUCT_MATCH_LABELS[status]}
               </option>
             ))}
           </select>

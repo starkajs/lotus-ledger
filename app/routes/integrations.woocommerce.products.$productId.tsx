@@ -4,6 +4,8 @@ import type { Route } from "./+types/integrations.woocommerce.products.$productI
 import { AppPage } from "~/components/app-page";
 import { SubmitButton } from "~/components/submit-button";
 import { getWooCommerceSiteUrl } from "~/lib/env.server";
+import { classifyStripeTransactionsForWooCommerceLinks } from "~/lib/product-classification.server";
+import { formatNewlyMappedStripeTransactions } from "~/lib/stripe-product-bulk-assign";
 import { listProducts } from "~/lib/products.server";
 import { requireUser } from "~/lib/session.server";
 import { formatWooCommerceMoneyMinor } from "~/lib/woocommerce-money";
@@ -72,11 +74,17 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     ? `${siteUrl}/wp-admin/post.php?post=${product.wcProductId}&action=edit`
     : null;
 
-  return { product, returnTo, catalogProducts: options, wpAdminProductUrl };
+  return {
+    product,
+    returnTo,
+    catalogProducts: options,
+    wpAdminProductUrl,
+    stripeMapped: url.searchParams.get("stripeMapped"),
+  };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
-  await requireUser(request);
+  const user = await requireUser(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
   const returnTo = String(
@@ -84,12 +92,16 @@ export async function action({ request, params }: Route.ActionArgs) {
   );
 
   const detailPath = `/integrations/woocommerce/products/${params.productId}`;
-  const redirectUrl = `${detailPath}?returnTo=${encodeURIComponent(returnTo)}`;
 
   if (intent === "setLotusProduct") {
     const productId = String(form.get("productId") ?? "").trim() || null;
     try {
       await setWooCommerceProductLotusLink(params.productId, productId);
+      const stripe = await classifyStripeTransactionsForWooCommerceLinks({
+        woocommerceProductRowIds: [params.productId],
+        audit: { triggeredBy: "app", userId: user.id },
+      });
+      const redirectUrl = `${detailPath}?returnTo=${encodeURIComponent(returnTo)}&stripeMapped=${stripe.newlyMapped}`;
       return redirect(redirectUrl);
     } catch (err) {
       return {
@@ -106,7 +118,8 @@ export default function WooCommerceProductDetailPage({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { product, returnTo, catalogProducts, wpAdminProductUrl } = loaderData;
+  const { product, returnTo, catalogProducts, wpAdminProductUrl, stripeMapped } =
+    loaderData;
   const location = useLocation();
   const postAction = location.pathname + location.search;
 
@@ -127,8 +140,14 @@ export default function WooCommerceProductDetailPage({
         <h2 className="text-sm font-medium text-dark">Lotus product</h2>
         <p className="mt-1 text-xs text-ink-muted">
           Link this WooCommerce product to a single catalog product for reporting
-          and QuickBooks mapping.
+          and QuickBooks mapping. Stripe charges for orders of this product
+          take the same Lotus product.
         </p>
+        {stripeMapped != null && (
+          <p className="mt-2 text-sm text-jade" role="status">
+            {formatNewlyMappedStripeTransactions(Number(stripeMapped) || 0)}
+          </p>
+        )}
         {product.lotusProduct ? (
           <p className="mt-2 text-sm text-dark">
             <Link

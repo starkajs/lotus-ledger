@@ -108,6 +108,7 @@ export function summarizeJobResult(result: Record<string, unknown> | null): stri
     "updated",
     "processed",
     "matched",
+    "fromWooCommerce",
     "unmatched",
     "ambiguous",
     "classified",

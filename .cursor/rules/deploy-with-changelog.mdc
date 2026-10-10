@@ -1,0 +1,14 @@
+---
+description: Ship every Lotus Ledger deployment with a changelog entry
+alwaysApply: true
+---
+
+# Deploy with the changelog
+
+Every deployment includes a new entry at the top of `app/lib/changelog.ts`. Do not deploy work that has no changelog entry.
+
+1. Add the entry before the release commit. Set `shipped` to the deploy date. Set `parent` to the previous entry's `commit`. Leave `commit` empty.
+2. Commit the release.
+3. Set that entry's `commit` to the full SHA of the release commit, in a follow-up commit: "Point the … changelog entry at the commit that builds."
+4. Push `main` so the GitHub compare link resolves.
+5. Deploy with `fly deploy --app lotus-ledger`.
