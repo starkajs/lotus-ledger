@@ -21,6 +21,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-11-nightly-sync",
+    shipped: "2026-10-11",
+    title: "Nightly sync runs again",
+    changes: [
+      "The scheduled WooCommerce, Stripe, and QuickBooks sync starts on its own each night.",
+    ],
+    commit: "",
+    parent: "6001215034a37fc7dd836396dfd2494ffa8839bb",
+  },
+  {
     id: "2026-10-10-stripe-product-rules",
     shipped: "2026-10-10",
     title: "Stripe products from orders and rules",
