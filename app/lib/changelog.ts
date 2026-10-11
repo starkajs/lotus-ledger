@@ -27,7 +27,7 @@ export const changelog: ChangelogEntry[] = [
     changes: [
       "A QuickBooks to pushed reconciliation compares sales and refund receipts with the Stripe charges Lotus pushed, and lists duplicate receipts on their own.",
     ],
-    commit: "",
+    commit: "df8e74a56f443e492d604cc798fdbab104f3eb4a",
     parent: "d7f705336f60f07876a332657c4d8b7e1a43a88c",
   },
   {
