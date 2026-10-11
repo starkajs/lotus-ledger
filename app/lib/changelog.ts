@@ -27,7 +27,7 @@ export const changelog: ChangelogEntry[] = [
     changes: [
       "The scheduled WooCommerce, Stripe, and QuickBooks sync starts on its own each night.",
     ],
-    commit: "",
+    commit: "d7f705336f60f07876a332657c4d8b7e1a43a88c",
     parent: "6001215034a37fc7dd836396dfd2494ffa8839bb",
   },
   {
