@@ -31,6 +31,7 @@ const navItems: NavItem[] = [
   { to: "/reconciliations", label: "Reconciliations", end: true },
   { to: "/reconciliations/wc-stripe", label: "WC ↔ Stripe", child: true },
   { to: "/reconciliations/stripe-qb", label: "Stripe ↔ QB", child: true },
+  { to: "/reconciliations/qb-pushed", label: "QB ↔ pushed", child: true },
   { to: "/integrations/woocommerce", label: "WooCommerce", end: true },
   { to: "/integrations/woocommerce/orders", label: "WC orders", child: true },
   { to: "/integrations/woocommerce/products", label: "WC products", child: true },

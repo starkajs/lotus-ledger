@@ -18,6 +18,7 @@ export default [
     route("reconciliations", "routes/reconciliations.tsx"),
     route("reconciliations/wc-stripe", "routes/reconciliations.wc-stripe.tsx"),
     route("reconciliations/stripe-qb", "routes/reconciliations.stripe-qb.tsx"),
+    route("reconciliations/qb-pushed", "routes/reconciliations.qb-pushed.tsx"),
     route("users", "routes/users.tsx"),
     route("sign-ins", "routes/sign-ins.tsx"),
     route("integrations/invite", "routes/integrations.invite.tsx"),

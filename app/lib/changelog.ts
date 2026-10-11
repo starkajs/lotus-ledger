@@ -21,6 +21,16 @@ export type ChangelogEntry = {
 
 export const changelog: ChangelogEntry[] = [
   {
+    id: "2026-10-11-qb-pushed-reconciliation",
+    shipped: "2026-10-11",
+    title: "QuickBooks against what Lotus pushed",
+    changes: [
+      "A QuickBooks to pushed reconciliation compares sales and refund receipts with the Stripe charges Lotus pushed, and lists duplicate receipts on their own.",
+    ],
+    commit: "",
+    parent: "d7f705336f60f07876a332657c4d8b7e1a43a88c",
+  },
+  {
     id: "2026-10-11-nightly-sync",
     shipped: "2026-10-11",
     title: "Nightly sync runs again",

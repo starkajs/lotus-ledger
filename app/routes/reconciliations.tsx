@@ -28,6 +28,12 @@ const reconciliations = [
     description:
       "Compare Stripe balance transactions and synced QuickBooks sales receipts in Lotus Ledger. Matched pairs, unpushed or unlinked Stripe, and QB receipts without a Stripe link.",
   },
+  {
+    to: "/reconciliations/qb-pushed",
+    title: "QuickBooks ↔ pushed",
+    description:
+      "Compare QuickBooks sales and refund receipts with the Stripe charges Lotus pushed. Duplicate receipts for the same push are listed on their own.",
+  },
 ] as const;
 
 export default function ReconciliationsPage({}: Route.ComponentProps) {
